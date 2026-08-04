@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<title>Shade - cliente de prueba</title>
+<style>
+  body {
+    background: #111;
+    color: #eee;
+    font-family: system-ui, sans-serif;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 16px;
+    padding: 40px;
+  }
+  #status { font-size: 13px; opacity: 0.7; }
+  #status.connected { color: #6f6; }
+  #status.disconnected { color: #f66; }
+  #art {
+    width: 220px;
+    height: 220px;
+    object-fit: cover;
+    background: #222;
+    border-radius: 8px;
+  }
+  #title { font-size: 20px; font-weight: 600; margin-top: 8px; }
+  #artist, #album { font-size: 14px; opacity: 0.8; }
+  #time { font-size: 12px; opacity: 0.6; font-variant-numeric: tabular-nums; }
+  #controls { display: flex; gap: 12px; margin-top: 8px; }
+  button {
+    background: #222;
+    color: #eee;
+    border: 1px solid #444;
+    border-radius: 6px;
+    padding: 8px 16px;
+    font-size: 16px;
+    cursor: pointer;
+  }
+  button:hover { background: #333; }
+  #log {
+    width: 480px;
+    height: 160px;
+    overflow-y: auto;
+    background: #181818;
+    border: 1px solid #333;
+    border-radius: 6px;
+    padding: 8px;
+    font-family: ui-monospace, monospace;
+    font-size: 11px;
+    white-space: pre-wrap;
+  }
+</style>
+</head>
+<body>
+  <div id="status" class="disconnected">desconectado</div>
+  <img id="art" alt="carátula" />
+  <div id="title">-</div>
+  <div id="artist">-</div>
+  <div id="album">-</div>
+  <div id="time">-- / --</div>
+  <div id="controls">
+    <button id="prev">⏮</button>
+    <button id="playPause">⏯</button>
+    <button id="next">⏭</button>
+  </div>
+  <div id="log"></div>
+
+<script>
+const WS_URL = "ws://127.0.0.1:8080";
+const ART_URL = (hash) => `http://127.0.0.1:8080/art/${hash}`;
+
+const statusEl = document.getElementById("status");
+const artEl = document.getElementById("art");
+const titleEl = document.getElementById("title");
+const artistEl = document.getElementById("artist");
+const albumEl = document.getElementById("album");
+const timeEl = document.getElementById("time");
+const logEl = document.getElementById("log");
+
+let socket = null;
+let reconnectDelayMs = 500;
+const MAX_RECONNECT_DELAY_MS = 8000;
+
+let durationMs = 0;
+let lastPositionMs = 0;
+let lastTimestampMs = 0;
+let lastArtHash = null;
+
+function log(line) {
+  const time = new Date().toLocaleTimeString();
+  logEl.textContent += `[${time}] ${line}\n`;
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+function fmt(ms) {
+  if (!Number.isFinite(ms) || ms < 0) return "--:--";
+  const totalSec = Math.floor(ms / 1000);
+  const min = Math.floor(totalSec / 60);
+  const sec = totalSec % 60;
+  return `${min}:${String(sec).padStart(2, "0")}`;
+}
+
+function connect() {
+  socket = new WebSocket(WS_URL);
+
+  socket.onopen = () => {
+    statusEl.textContent = "conectado";
+    statusEl.className = "connected";
+    reconnectDelayMs = 500;
+    log("conectado a " + WS_URL);
+  };
+
+  socket.onclose = () => {
+    statusEl.textContent = "desconectado, reintentando...";
+    statusEl.className = "disconnected";
+    log(`desconectado, reintento en ${reconnectDelayMs}ms`);
+    setTimeout(connect, reconnectDelayMs);
+    reconnectDelayMs = Math.min(reconnectDelayMs * 2, MAX_RECONNECT_DELAY_MS);
+  };
+
+  socket.onerror = () => socket.close();
+
+  socket.onmessage = (event) => {
+    const msg = JSON.parse(event.data);
+    log(JSON.stringify(msg));
+
+    if (msg.type === "track") {
+      titleEl.textContent = msg.title || "(sin título)";
+      artistEl.textContent = msg.artist || "";
+      albumEl.textContent = msg.album || "";
+      durationMs = msg.durationMs || 0;
+
+      if (msg.artHash && msg.artHash !== lastArtHash) {
+        lastArtHash = msg.artHash;
+        artEl.src = ART_URL(msg.artHash);
+      } else if (!msg.artHash) {
+        lastArtHash = null;
+        artEl.removeAttribute("src");
+      }
+    }
+
+    if (msg.type === "state") {
+      lastPositionMs = msg.positionMs || 0;
+      lastTimestampMs = msg.timestampMs || Date.now();
+      timeEl.textContent = `${fmt(lastPositionMs)} / ${fmt(durationMs)}`;
+    }
+  };
+}
+
+// Simple tick between state messages to keep the visible clock moving
+// (not meant to be the fine-grained interpolation the real app will do).
+setInterval(() => {
+  if (!lastTimestampMs) return;
+  const elapsed = Date.now() - lastTimestampMs;
+  timeEl.textContent = `${fmt(lastPositionMs + elapsed)} / ${fmt(durationMs)}`;
+}, 500);
+
+function sendCommand(action) {
+  if (socket && socket.readyState === WebSocket.OPEN) {
+    socket.send(JSON.stringify({ type: "cmd", action }));
+  }
+}
+
+document.getElementById("playPause").onclick = () => sendCommand("playPause");
+document.getElementById("next").onclick = () => sendCommand("next");
+document.getElementById("prev").onclick = () => sendCommand("prev");
+
+connect();
+</script>
+</body>
+</html>
