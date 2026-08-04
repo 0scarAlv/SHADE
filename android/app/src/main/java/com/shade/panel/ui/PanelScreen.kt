@@ -16,7 +16,9 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.VolumeDown
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
@@ -46,6 +48,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -54,7 +57,7 @@ import com.shade.panel.R
 import com.shade.panel.data.ConnectionState
 import com.shade.panel.ui.theme.PanelError
 import com.shade.panel.ui.theme.PanelOnBackgroundMuted
-import com.shade.panel.ui.theme.PanelSurface
+import com.shade.panel.ui.theme.PanelSpectrumIdle
 import com.shade.panel.ui.theme.PanelWarning
 
 @Composable
@@ -77,7 +80,8 @@ fun PanelScreen(viewModel: PanelViewModel = viewModel()) {
                 Column(
                     modifier = Modifier
                         .fillMaxHeight()
-                        .weight(1f),
+                        .weight(1f)
+                        .verticalScroll(rememberScrollState()),
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center,
                 ) {
@@ -128,6 +132,11 @@ private fun AlbumArt(artUrl: String?, size: Dp) {
     )
 }
 
+// Every line is locked to a fixed number of lines (title/artist/album to 1,
+// lyrics to always reserving 2 via minLines) so the block's total height
+// never changes as text comes and goes — otherwise everything below it
+// (progress, controls, volume) visibly jumps every time the lyric line or
+// the track changes.
 @Composable
 private fun TrackInfo(uiState: PanelUiState, textAlign: TextAlign) {
     Column(horizontalAlignment = if (textAlign == TextAlign.Center) Alignment.CenterHorizontally else Alignment.Start) {
@@ -136,29 +145,36 @@ private fun TrackInfo(uiState: PanelUiState, textAlign: TextAlign) {
             style = MaterialTheme.typography.titleLarge,
             color = MaterialTheme.colorScheme.onBackground,
             textAlign = textAlign,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
         )
         Text(
             text = uiState.artist,
             style = MaterialTheme.typography.bodyMedium,
             color = PanelOnBackgroundMuted,
             textAlign = textAlign,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
         )
         Text(
             text = uiState.album,
             style = MaterialTheme.typography.bodySmall,
             color = PanelOnBackgroundMuted,
             textAlign = textAlign,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
         )
-        uiState.currentLyricsLine?.let { line ->
-            Spacer(Modifier.height(12.dp))
-            Text(
-                text = line,
-                style = MaterialTheme.typography.bodyLarge,
-                fontStyle = FontStyle.Italic,
-                color = MaterialTheme.colorScheme.primary,
-                textAlign = textAlign,
-            )
-        }
+        Spacer(Modifier.height(12.dp))
+        Text(
+            text = uiState.currentLyricsLine.orEmpty(),
+            style = MaterialTheme.typography.bodyLarge,
+            fontStyle = FontStyle.Italic,
+            color = MaterialTheme.colorScheme.primary,
+            textAlign = textAlign,
+            minLines = 2,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }
 
@@ -180,7 +196,7 @@ private fun SpectrumProgress(uiState: PanelUiState, onSeek: (Long) -> Unit) {
     val displayedPositionMs = if (isDragging) (dragFraction * durationMs).toLong() else uiState.positionMs
 
     val playedColor = MaterialTheme.colorScheme.primary
-    val unplayedColor = PanelSurface
+    val unplayedColor = PanelSpectrumIdle
     val bands = uiState.spectrumBands
 
     Column(modifier = Modifier.fillMaxWidth()) {
@@ -218,7 +234,7 @@ private fun SpectrumProgress(uiState: PanelUiState, onSeek: (Long) -> Unit) {
             val progressX = size.width * progressFraction
 
             bands.forEachIndexed { index, magnitude ->
-                val barHeight = size.height * magnitude.coerceIn(0.04f, 1f)
+                val barHeight = size.height * magnitude.coerceIn(0.06f, 1f)
                 val x = index * (barWidth + gap)
                 drawRoundRect(
                     color = if (x <= progressX) playedColor else unplayedColor,

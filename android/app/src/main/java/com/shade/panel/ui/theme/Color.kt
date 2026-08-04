@@ -4,6 +4,7 @@ import androidx.compose.ui.graphics.Color
 
 val PanelBackground = Color(0xFF111111)
 val PanelSurface = Color(0xFF1C1C1C)
+val PanelSpectrumIdle = Color(0xFF4A4A4A)
 val PanelAccent = Color(0xFF10B981)
 val PanelWarning = Color(0xFFF59E0B)
 val PanelError = Color(0xFFEF4444)

@@ -93,7 +93,10 @@ public sealed class SpectrumAnalyzer : IDisposable
             }
 
             var magnitude = count > 0 ? sum / count : 0f;
-            bands[band] = Math.Clamp(MathF.Log10(1 + magnitude * 50) / 2.5f, 0f, 1f);
+            // The raw FFT magnitudes for typical music are tiny (~0.01-0.1),
+            // so this needs a fairly aggressive gain curve to read as an
+            // actual visible equalizer instead of a flat line.
+            bands[band] = Math.Clamp(MathF.Log10(1 + magnitude * 200) / 1.4f, 0f, 1f);
         }
 
         SpectrumAvailable?.Invoke(bands);
