@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Shade</string>
+    <string name="no_track">Sin reproducción</string>
+    <string name="status_connected">Conectado</string>
+    <string name="status_connecting">Conectando…</string>
+    <string name="status_disconnected">Desconectado</string>
+    <string name="action_previous">Anterior</string>
+    <string name="action_play_pause">Reproducir o pausar</string>
+    <string name="action_next">Siguiente</string>
+</resources>
