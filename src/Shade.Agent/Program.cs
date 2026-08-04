@@ -14,6 +14,7 @@ builder.Services.AddSingleton<SmtcSessionWatcher>();
 builder.Services.AddSingleton<ArtCache>();
 builder.Services.AddSingleton<ClientHub>();
 builder.Services.AddSingleton<SystemVolumeController>();
+builder.Services.AddSingleton<SpectrumAnalyzer>();
 builder.Services.AddSingleton<LyricsProvider>();
 builder.Services.AddHostedService<AdbReverseWatchdog>();
 
@@ -23,6 +24,7 @@ var smtc = app.Services.GetRequiredService<SmtcSessionWatcher>();
 var artCache = app.Services.GetRequiredService<ArtCache>();
 var clientHub = app.Services.GetRequiredService<ClientHub>();
 var volumeController = app.Services.GetRequiredService<SystemVolumeController>();
+var spectrumAnalyzer = app.Services.GetRequiredService<SpectrumAnalyzer>();
 var lyricsProvider = app.Services.GetRequiredService<LyricsProvider>();
 var logger = app.Services.GetRequiredService<ILogger<Program>>();
 
@@ -47,8 +49,25 @@ smtc.TrackChanged += track =>
     }
 };
 
-void BroadcastState(PlaybackState state) =>
+void BroadcastState(PlaybackState state)
+{
+    // The visualizer only makes sense while something's actually playing —
+    // start/stop the WASAPI capture alongside it instead of running it
+    // (and spamming the socket) against a silent desktop. Both calls are
+    // idempotent, so re-broadcasting the same Playing value (e.g. after a
+    // volume change) is harmless.
+    if (state.Playing)
+    {
+        spectrumAnalyzer.Start();
+    }
+    else
+    {
+        spectrumAnalyzer.Stop();
+        _ = clientHub.BroadcastAsync(new SpectrumMessage(new float[32]));
+    }
+
     _ = clientHub.BroadcastAsync(new StateMessage(state.Playing, state.PositionMs, state.TimestampMs, volumeController.GetVolume()));
+}
 
 smtc.StateChanged += BroadcastState;
 
@@ -56,6 +75,8 @@ volumeController.VolumeChanged += () =>
 {
     if (smtc.CurrentState is { } state) BroadcastState(state);
 };
+
+spectrumAnalyzer.SpectrumAvailable += bands => _ = clientHub.BroadcastAsync(new SpectrumMessage(bands));
 
 async Task FetchAndBroadcastLyricsAsync(TrackInfo track)
 {

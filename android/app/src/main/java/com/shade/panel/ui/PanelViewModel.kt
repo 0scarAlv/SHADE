@@ -24,7 +24,10 @@ data class PanelUiState(
     val durationMs: Long = 0,
     val volume: Double? = null,
     val currentLyricsLine: String? = null,
+    val spectrumBands: List<Float> = List(BAND_COUNT) { 0f },
 )
+
+const val BAND_COUNT = 32
 
 class PanelViewModel(
     private val socket: ShadeSocket = ShadeSocket(),
@@ -85,6 +88,21 @@ class PanelViewModel(
         viewModelScope.launch {
             socket.lyricsUpdates.collect { lyrics ->
                 lyricsLines = lyrics.lines.orEmpty()
+            }
+        }
+        viewModelScope.launch {
+            socket.spectrumUpdates.collect { spectrum ->
+                val incoming = spectrum.bands
+                _uiState.update { current ->
+                    // Light smoothing between frames so the bars glide instead
+                    // of jumping — the agent already sends ~20-30 frames/sec,
+                    // this just takes the edge off.
+                    val smoothed = current.spectrumBands.mapIndexed { i, previous ->
+                        val target = incoming.getOrElse(i) { 0f }
+                        previous * 0.4f + target * 0.6f
+                    }
+                    current.copy(spectrumBands = smoothed)
+                }
             }
         }
         viewModelScope.launch {

@@ -1,5 +1,8 @@
 package com.shade.panel.ui
 
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -24,8 +27,6 @@ import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Slider
-import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -37,6 +38,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontStyle
@@ -73,13 +78,14 @@ fun PanelScreen(viewModel: PanelViewModel = viewModel()) {
                     modifier = Modifier
                         .fillMaxHeight()
                         .weight(1f),
+                    horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center,
                 ) {
                     ConnectionBadge(uiState.connection)
                     Spacer(Modifier.height(12.dp))
                     TrackInfo(uiState, textAlign = TextAlign.Start)
                     Spacer(Modifier.height(16.dp))
-                    ProgressSection(uiState, onSeek = viewModel::seek)
+                    SpectrumProgress(uiState, onSeek = viewModel::seek)
                     Spacer(Modifier.height(20.dp))
                     ControlsRow(uiState, viewModel)
                     Spacer(Modifier.height(12.dp))
@@ -100,7 +106,7 @@ fun PanelScreen(viewModel: PanelViewModel = viewModel()) {
                 Spacer(Modifier.height(20.dp))
                 TrackInfo(uiState, textAlign = TextAlign.Center)
                 Spacer(Modifier.height(16.dp))
-                ProgressSection(uiState, onSeek = viewModel::seek)
+                SpectrumProgress(uiState, onSeek = viewModel::seek)
                 Spacer(Modifier.height(20.dp))
                 ControlsRow(uiState, viewModel)
                 Spacer(Modifier.height(16.dp))
@@ -156,34 +162,77 @@ private fun TrackInfo(uiState: PanelUiState, textAlign: TextAlign) {
     }
 }
 
+// Doubles as the seek control: tapping or dragging anywhere across the bars
+// jumps to that fraction of the track. Bars left of the playhead are tinted
+// with the accent color, bars to the right stay dim — same information a
+// flat progress bar carried, just riding on top of the live spectrum.
 @Composable
-private fun ProgressSection(uiState: PanelUiState, onSeek: (Long) -> Unit) {
+private fun SpectrumProgress(uiState: PanelUiState, onSeek: (Long) -> Unit) {
     var isDragging by remember { mutableStateOf(false) }
-    var dragValue by remember { mutableFloatStateOf(0f) }
+    var dragFraction by remember { mutableFloatStateOf(0f) }
 
     val durationMs = uiState.durationMs.coerceAtLeast(0L)
-    val sliderValue = if (isDragging) dragValue else uiState.positionMs.toFloat().coerceIn(0f, durationMs.toFloat())
+    val progressFraction = when {
+        isDragging -> dragFraction
+        durationMs > 0 -> (uiState.positionMs.toFloat() / durationMs).coerceIn(0f, 1f)
+        else -> 0f
+    }
+    val displayedPositionMs = if (isDragging) (dragFraction * durationMs).toLong() else uiState.positionMs
+
+    val playedColor = MaterialTheme.colorScheme.primary
+    val unplayedColor = PanelSurface
+    val bands = uiState.spectrumBands
 
     Column(modifier = Modifier.fillMaxWidth()) {
-        Slider(
-            value = sliderValue,
-            onValueChange = {
-                isDragging = true
-                dragValue = it
-            },
-            onValueChangeFinished = {
-                onSeek(dragValue.toLong())
-                isDragging = false
-            },
-            valueRange = 0f..durationMs.toFloat().coerceAtLeast(1f),
-            enabled = durationMs > 0,
-            colors = SliderDefaults.colors(inactiveTrackColor = PanelSurface),
-        )
+        Canvas(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(56.dp)
+                .pointerInput(durationMs) {
+                    if (durationMs <= 0) return@pointerInput
+                    detectTapGestures { offset ->
+                        onSeek(((offset.x / size.width).coerceIn(0f, 1f) * durationMs).toLong())
+                    }
+                }
+                .pointerInput(durationMs) {
+                    if (durationMs <= 0) return@pointerInput
+                    detectDragGestures(
+                        onDragStart = { offset ->
+                            isDragging = true
+                            dragFraction = (offset.x / size.width).coerceIn(0f, 1f)
+                        },
+                        onDragEnd = {
+                            onSeek((dragFraction * durationMs).toLong())
+                            isDragging = false
+                        },
+                        onDragCancel = { isDragging = false },
+                    ) { change, _ ->
+                        change.consume()
+                        dragFraction = (change.position.x / size.width).coerceIn(0f, 1f)
+                    }
+                },
+        ) {
+            val barCount = bands.size.coerceAtLeast(1)
+            val gap = 3.dp.toPx()
+            val barWidth = (size.width - gap * (barCount - 1)) / barCount
+            val progressX = size.width * progressFraction
+
+            bands.forEachIndexed { index, magnitude ->
+                val barHeight = size.height * magnitude.coerceIn(0.04f, 1f)
+                val x = index * (barWidth + gap)
+                drawRoundRect(
+                    color = if (x <= progressX) playedColor else unplayedColor,
+                    topLeft = Offset(x, size.height - barHeight),
+                    size = Size(barWidth, barHeight),
+                    cornerRadius = CornerRadius(barWidth / 2),
+                )
+            }
+        }
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
-            Text(formatMs(sliderValue.toLong()), style = MaterialTheme.typography.labelSmall, color = PanelOnBackgroundMuted)
+            Text(formatMs(displayedPositionMs), style = MaterialTheme.typography.labelSmall, color = PanelOnBackgroundMuted)
             Text(formatMs(durationMs), style = MaterialTheme.typography.labelSmall, color = PanelOnBackgroundMuted)
         }
     }
@@ -223,20 +272,28 @@ private fun ControlsRow(uiState: PanelUiState, viewModel: PanelViewModel) {
 private fun VolumeRow(uiState: PanelUiState, viewModel: PanelViewModel) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        IconButton(onClick = viewModel::volumeDown) {
-            Icon(Icons.AutoMirrored.Filled.VolumeDown, contentDescription = stringResource(R.string.action_volume_down))
+        IconButton(onClick = viewModel::volumeDown, modifier = Modifier.size(56.dp)) {
+            Icon(
+                Icons.AutoMirrored.Filled.VolumeDown,
+                contentDescription = stringResource(R.string.action_volume_down),
+                modifier = Modifier.size(30.dp),
+            )
         }
         Text(
             text = uiState.volume?.let { "${(it * 100).toInt()}%" } ?: "—",
-            style = MaterialTheme.typography.labelMedium,
+            style = MaterialTheme.typography.labelLarge,
             color = PanelOnBackgroundMuted,
-            modifier = Modifier.width(40.dp),
+            modifier = Modifier.width(48.dp),
             textAlign = TextAlign.Center,
         )
-        IconButton(onClick = viewModel::volumeUp) {
-            Icon(Icons.AutoMirrored.Filled.VolumeUp, contentDescription = stringResource(R.string.action_volume_up))
+        IconButton(onClick = viewModel::volumeUp, modifier = Modifier.size(56.dp)) {
+            Icon(
+                Icons.AutoMirrored.Filled.VolumeUp,
+                contentDescription = stringResource(R.string.action_volume_up),
+                modifier = Modifier.size(30.dp),
+            )
         }
     }
 }

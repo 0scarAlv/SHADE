@@ -30,6 +30,11 @@ public sealed record LyricsMessage(
     public string Type => "lyrics";
 }
 
+public sealed record SpectrumMessage(float[] Bands)
+{
+    public string Type => "spectrum";
+}
+
 // App -> Agent
 
 public sealed record IncomingCommand(string Type, string Action, double? Value);

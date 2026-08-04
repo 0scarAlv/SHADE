@@ -34,6 +34,11 @@ data class LyricsMessage(
 )
 
 @Serializable
+data class SpectrumMessage(
+    val bands: List<Float>,
+)
+
+@Serializable
 data class CommandMessage(
     val type: String = "cmd",
     val action: String,
