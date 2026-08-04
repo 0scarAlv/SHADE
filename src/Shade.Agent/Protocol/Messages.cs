@@ -16,9 +16,18 @@ public sealed record StateMessage(
     bool Playing,
     long PositionMs,
     long TimestampMs,
-    double? Volume = null) // CoreAudio lands in a later phase; omitted from the JSON while null.
+    double? Volume = null)
 {
     public string Type => "state";
+}
+
+public sealed record LyricsLine(long TimeMs, string Text);
+
+public sealed record LyricsMessage(
+    List<LyricsLine>? Lines,
+    string? Plain)
+{
+    public string Type => "lyrics";
 }
 
 // App -> Agent

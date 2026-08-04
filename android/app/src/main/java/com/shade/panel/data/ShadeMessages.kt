@@ -22,6 +22,18 @@ data class StateMessage(
 )
 
 @Serializable
+data class LyricsLine(
+    val timeMs: Long,
+    val text: String,
+)
+
+@Serializable
+data class LyricsMessage(
+    val lines: List<LyricsLine>? = null,
+    val plain: String? = null,
+)
+
+@Serializable
 data class CommandMessage(
     val type: String = "cmd",
     val action: String,

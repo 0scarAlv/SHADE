@@ -8,4 +8,6 @@
     <string name="action_previous">Anterior</string>
     <string name="action_play_pause">Reproducir o pausar</string>
     <string name="action_next">Siguiente</string>
+    <string name="action_volume_up">Subir volumen</string>
+    <string name="action_volume_down">Bajar volumen</string>
 </resources>

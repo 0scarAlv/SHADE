@@ -180,6 +180,18 @@ public sealed class SmtcSessionWatcher : IAsyncDisposable
         await session.TrySkipPreviousAsync();
     }
 
+    public async Task TrySeekAsync(long positionMs)
+    {
+        if (_session is not { } session) return;
+
+        var accepted = await session.TryChangePlaybackPositionAsync(TimeSpan.FromMilliseconds(positionMs).Ticks);
+        if (!accepted)
+        {
+            _logger.LogWarning(
+                "La app de la sesión activa rechazó el seek (no implementa TryChangePlaybackPositionAsync en su SMTC).");
+        }
+    }
+
     private static long NowMs() => DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 
     public ValueTask DisposeAsync()

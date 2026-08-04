@@ -52,6 +52,9 @@ class ShadeSocket(
     private val _stateUpdates = MutableSharedFlow<StateMessage>(extraBufferCapacity = 1)
     val stateUpdates: SharedFlow<StateMessage> = _stateUpdates.asSharedFlow()
 
+    private val _lyricsUpdates = MutableSharedFlow<LyricsMessage>(extraBufferCapacity = 1)
+    val lyricsUpdates: SharedFlow<LyricsMessage> = _lyricsUpdates.asSharedFlow()
+
     fun connect() {
         reconnectJob?.cancel()
         _connectionState.value = ConnectionState.CONNECTING
@@ -81,6 +84,8 @@ class ShadeSocket(
                     .onSuccess { _trackUpdates.tryEmit(it) }
                 "state" -> runCatching { json.decodeFromJsonElement(StateMessage.serializer(), element) }
                     .onSuccess { _stateUpdates.tryEmit(it) }
+                "lyrics" -> runCatching { json.decodeFromJsonElement(LyricsMessage.serializer(), element) }
+                    .onSuccess { _lyricsUpdates.tryEmit(it) }
             }
         }
 

@@ -2,3 +2,7 @@ bin/
 obj/
 .vs/
 *.user
+
+# Built artifacts (APK, published agent exe) — too large for git history,
+# kept as local files / GitHub Release assets instead.
+dist/
