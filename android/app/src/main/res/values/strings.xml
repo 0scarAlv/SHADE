@@ -10,4 +10,7 @@
     <string name="action_next">Siguiente</string>
     <string name="action_volume_up">Subir volumen</string>
     <string name="action_volume_down">Bajar volumen</string>
+    <string name="action_back">Atrás</string>
+    <string name="tile_player">Reproductor</string>
+    <string name="tile_coming_soon">Próximamente</string>
 </resources>

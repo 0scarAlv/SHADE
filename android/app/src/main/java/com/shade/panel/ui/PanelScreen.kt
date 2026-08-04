@@ -1,5 +1,11 @@
 package com.shade.panel.ui
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -20,6 +26,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.VolumeDown
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.Pause
@@ -61,8 +68,10 @@ import com.shade.panel.ui.theme.PanelSpectrumIdle
 import com.shade.panel.ui.theme.PanelWarning
 
 @Composable
-fun PanelScreen(viewModel: PanelViewModel = viewModel()) {
+fun PanelScreen(viewModel: PanelViewModel = viewModel(), onBack: () -> Unit = {}) {
     val uiState by viewModel.uiState.collectAsState()
+
+    BackHandler(onBack = onBack)
 
     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
         val isLandscape = maxWidth > maxHeight
@@ -117,6 +126,10 @@ fun PanelScreen(viewModel: PanelViewModel = viewModel()) {
                 VolumeRow(uiState, viewModel)
             }
         }
+
+        IconButton(onClick = onBack, modifier = Modifier.align(Alignment.TopStart).padding(8.dp)) {
+            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.action_back))
+        }
     }
 }
 
@@ -139,7 +152,14 @@ private fun AlbumArt(artUrl: String?, size: Dp) {
 // the track changes.
 @Composable
 private fun TrackInfo(uiState: PanelUiState, textAlign: TextAlign) {
-    Column(horizontalAlignment = if (textAlign == TextAlign.Center) Alignment.CenterHorizontally else Alignment.Start) {
+    // fillMaxWidth is what actually keeps this block still — maxLines alone
+    // only pins the height. Without a fixed width, a Column just wraps to its
+    // widest line, so the whole block still grows/shrinks sideways (and jumps
+    // around, since it's centered) every time the title or the lyric changes.
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalAlignment = if (textAlign == TextAlign.Center) Alignment.CenterHorizontally else Alignment.Start,
+    ) {
         Text(
             text = uiState.title.ifBlank { stringResource(R.string.no_track) },
             style = MaterialTheme.typography.titleLarge,
@@ -165,16 +185,22 @@ private fun TrackInfo(uiState: PanelUiState, textAlign: TextAlign) {
             overflow = TextOverflow.Ellipsis,
         )
         Spacer(Modifier.height(12.dp))
-        Text(
-            text = uiState.currentLyricsLine.orEmpty(),
-            style = MaterialTheme.typography.bodyLarge,
-            fontStyle = FontStyle.Italic,
-            color = MaterialTheme.colorScheme.primary,
-            textAlign = textAlign,
-            minLines = 2,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
-        )
+        AnimatedContent(
+            targetState = uiState.currentLyricsLine.orEmpty(),
+            transitionSpec = { (fadeIn(tween(220)) togetherWith fadeOut(tween(220))) },
+            label = "lyrics-line",
+        ) { line ->
+            Text(
+                text = line,
+                style = MaterialTheme.typography.bodyLarge,
+                fontStyle = FontStyle.Italic,
+                color = MaterialTheme.colorScheme.primary,
+                textAlign = textAlign,
+                minLines = 2,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
     }
 }
 
