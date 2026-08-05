@@ -38,9 +38,10 @@ smtc.TrackChanged += track =>
     if (track.ArtBytes is not null && track.ArtHash is not null && track.ArtContentType is not null)
     {
         artCache.Store(track.ArtHash, track.ArtBytes, track.ArtContentType);
-        // WebSocket clients fetch art over HTTP GET /art/{hash} instead; this
-        // only reaches Bluetooth-connected clients (no-op otherwise).
-        _ = clientHub.BroadcastArtAsync(track.ArtHash, track.ArtBytes, track.ArtContentType);
+        // WebSocket clients fetch the full-size art over HTTP GET /art/{hash}
+        // instead; this only reaches Bluetooth-connected clients (no-op
+        // otherwise), resized down first — see PushResizedArtAsync.
+        _ = PushResizedArtAsync(track.ArtHash, track.ArtBytes);
     }
 
     _ = clientHub.BroadcastAsync(new TrackMessage(
@@ -95,6 +96,29 @@ async Task FetchAndBroadcastLyricsAsync(TrackInfo track)
     await clientHub.BroadcastAsync(message);
 }
 
+// SMTC can hand back oversized thumbnails (seen up to 1500x1500) — sending
+// that raw over Bluetooth's much lower throughput blocks every other
+// broadcast queued behind it on the same connection. Resize once here rather
+// than per-connection.
+async Task<(byte[] Bytes, string ContentType)?> TryResizeArtForBluetoothAsync(byte[] original)
+{
+    try
+    {
+        return await ArtResizer.ResizeForBluetoothAsync(original);
+    }
+    catch (Exception ex)
+    {
+        logger.LogWarning(ex, "No se pudo redimensionar la carátula para Bluetooth.");
+        return null;
+    }
+}
+
+async Task PushResizedArtAsync(string hash, byte[] originalBytes)
+{
+    if (await TryResizeArtForBluetoothAsync(originalBytes) is not { } resized) return;
+    await clientHub.BroadcastArtAsync(hash, resized.Bytes, resized.ContentType);
+}
+
 // A client that just (re)connected needs to be caught up immediately —
 // otherwise it's blind until the next real SMTC change, which can take
 // minutes. Shared by both transports.
@@ -104,8 +128,11 @@ async Task SendCatchUpAsync(IClientConnection connection, CancellationToken ct)
     {
         await clientHub.SendToAsync(connection, new TrackMessage(
             track.Title, track.Artist, track.Album, track.DurationMs, track.ArtHash), ct);
-        if (track.ArtBytes is not null && track.ArtHash is not null && track.ArtContentType is not null)
-            await connection.SendArtAsync(track.ArtHash, track.ArtContentType, track.ArtBytes, ct);
+        if (track.ArtBytes is not null && track.ArtHash is not null
+            && await TryResizeArtForBluetoothAsync(track.ArtBytes) is { } resized)
+        {
+            await connection.SendArtAsync(track.ArtHash, resized.ContentType, resized.Bytes, ct);
+        }
     }
     if (smtc.CurrentState is { } state)
     {

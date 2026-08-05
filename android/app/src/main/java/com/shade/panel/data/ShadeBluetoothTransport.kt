@@ -106,17 +106,17 @@ class ShadeBluetoothTransport(
             _connectionState.value = ConnectionState.CONNECTING
 
             val address = deviceAddressProvider()
-            val adapter = (appContext.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager)?.adapter
-            val device = address?.let { addr -> adapter?.bondedDevices?.firstOrNull { it.address == addr } }
-
-            val newSocket = if (adapter != null && device != null) {
-                try {
-                    adapter.cancelDiscovery()
-                    device.createRfcommSocketToServiceRecord(SHADE_SERVICE_UUID).also { it.connect() }
-                } catch (e: IOException) {
-                    null
-                }
-            } else {
+            val newSocket = try {
+                val adapter = (appContext.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager)?.adapter
+                val device = address?.let { addr -> adapter?.bondedDevices?.firstOrNull { it.address == addr } }
+                // No adapter.cancelDiscovery() here on purpose: it requires
+                // BLUETOOTH_SCAN on API 31+ even though this class never calls
+                // startDiscovery() itself — not worth requesting a permission
+                // we otherwise don't need for one defensive call.
+                device?.createRfcommSocketToServiceRecord(SHADE_SERVICE_UUID)?.also { it.connect() }
+            } catch (e: IOException) {
+                null
+            } catch (e: SecurityException) {
                 null
             }
 

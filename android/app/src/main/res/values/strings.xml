@@ -11,6 +11,8 @@
     <string name="action_volume_up">Subir volumen</string>
     <string name="action_volume_down">Bajar volumen</string>
     <string name="action_back">Atrás</string>
+    <string name="action_keep_screen_on">Mantener la pantalla encendida</string>
+    <string name="action_keep_screen_on_off">Dejar que la pantalla se apague sola</string>
     <string name="tile_player">Reproductor</string>
     <string name="tile_connection">Conexión</string>
     <string name="tile_coming_soon">Próximamente</string>

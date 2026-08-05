@@ -34,11 +34,14 @@ import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -53,6 +56,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.style.TextAlign
@@ -97,8 +101,19 @@ fun PanelScreen(
     onBack: () -> Unit = {},
 ) {
     val uiState by viewModel.uiState.collectAsState()
+    val context = LocalContext.current
+    val preferences = remember { ShadePreferences(context) }
+    var keepScreenOn by remember { mutableStateOf(preferences.keepScreenOn) }
 
     BackHandler(onBack = onBack)
+
+    // Plain window flag, no permission involved — only keeps the screen on
+    // while this screen is visible, and only while the toggle is on.
+    val view = LocalView.current
+    DisposableEffect(keepScreenOn) {
+        view.keepScreenOn = keepScreenOn
+        onDispose { view.keepScreenOn = false }
+    }
 
     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
         val isLandscape = maxWidth > maxHeight
@@ -128,8 +143,11 @@ fun PanelScreen(
                     SpectrumProgress(uiState, onSeek = viewModel::seek)
                     Spacer(Modifier.height(20.dp))
                     ControlsRow(uiState, viewModel)
-                    Spacer(Modifier.height(12.dp))
-                    VolumeRow(uiState, viewModel)
+                    Spacer(Modifier.height(4.dp))
+                    VolumeRow(uiState, viewModel, keepScreenOn) {
+                        keepScreenOn = !keepScreenOn
+                        preferences.keepScreenOn = keepScreenOn
+                    }
                 }
             }
         } else {
@@ -149,12 +167,20 @@ fun PanelScreen(
                 SpectrumProgress(uiState, onSeek = viewModel::seek)
                 Spacer(Modifier.height(20.dp))
                 ControlsRow(uiState, viewModel)
-                Spacer(Modifier.height(16.dp))
-                VolumeRow(uiState, viewModel)
+                Spacer(Modifier.height(6.dp))
+                VolumeRow(uiState, viewModel, keepScreenOn) {
+                    keepScreenOn = !keepScreenOn
+                    preferences.keepScreenOn = keepScreenOn
+                }
             }
         }
 
-        IconButton(onClick = onBack, modifier = Modifier.align(Alignment.TopStart).padding(8.dp)) {
+        // Top-right (and lower than the very edge) instead of top-left: easier
+        // to reach with a thumb once the phone is mounted as a fixed panel.
+        IconButton(
+            onClick = onBack,
+            modifier = Modifier.align(Alignment.TopEnd).padding(top = 56.dp, end = 8.dp).size(48.dp),
+        ) {
             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.action_back))
         }
     }
@@ -311,55 +337,64 @@ private fun ControlsRow(uiState: PanelUiState, viewModel: PanelViewModel) {
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(24.dp),
     ) {
-        IconButton(onClick = viewModel::prev, modifier = Modifier.size(64.dp)) {
+        IconButton(onClick = viewModel::prev, modifier = Modifier.size(84.dp)) {
             Icon(
                 Icons.Filled.SkipPrevious,
                 contentDescription = stringResource(R.string.action_previous),
-                modifier = Modifier.size(36.dp),
-            )
-        }
-        IconButton(onClick = viewModel::playPause, modifier = Modifier.size(80.dp)) {
-            Icon(
-                imageVector = if (uiState.playing) Icons.Filled.Pause else Icons.Filled.PlayArrow,
-                contentDescription = stringResource(R.string.action_play_pause),
                 modifier = Modifier.size(48.dp),
             )
         }
-        IconButton(onClick = viewModel::next, modifier = Modifier.size(64.dp)) {
+        IconButton(onClick = viewModel::playPause, modifier = Modifier.size(108.dp)) {
+            Icon(
+                imageVector = if (uiState.playing) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                contentDescription = stringResource(R.string.action_play_pause),
+                modifier = Modifier.size(64.dp),
+            )
+        }
+        IconButton(onClick = viewModel::next, modifier = Modifier.size(84.dp)) {
             Icon(
                 Icons.Filled.SkipNext,
                 contentDescription = stringResource(R.string.action_next),
-                modifier = Modifier.size(36.dp),
+                modifier = Modifier.size(48.dp),
             )
         }
     }
 }
 
 @Composable
-private fun VolumeRow(uiState: PanelUiState, viewModel: PanelViewModel) {
+private fun VolumeRow(uiState: PanelUiState, viewModel: PanelViewModel, keepScreenOn: Boolean, onToggleKeepScreenOn: () -> Unit) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        IconButton(onClick = viewModel::volumeDown, modifier = Modifier.size(56.dp)) {
+        IconButton(onClick = viewModel::volumeDown, modifier = Modifier.size(80.dp)) {
             Icon(
                 Icons.AutoMirrored.Filled.VolumeDown,
                 contentDescription = stringResource(R.string.action_volume_down),
-                modifier = Modifier.size(30.dp),
+                modifier = Modifier.size(44.dp),
             )
         }
         Text(
             text = uiState.volume?.let { "${(it * 100).toInt()}%" } ?: "—",
-            style = MaterialTheme.typography.labelLarge,
+            style = MaterialTheme.typography.titleMedium,
             color = PanelOnBackgroundMuted,
-            modifier = Modifier.width(48.dp),
+            modifier = Modifier.width(56.dp),
             textAlign = TextAlign.Center,
         )
-        IconButton(onClick = viewModel::volumeUp, modifier = Modifier.size(56.dp)) {
+        IconButton(onClick = viewModel::volumeUp, modifier = Modifier.size(80.dp)) {
             Icon(
                 Icons.AutoMirrored.Filled.VolumeUp,
                 contentDescription = stringResource(R.string.action_volume_up),
-                modifier = Modifier.size(30.dp),
+                modifier = Modifier.size(44.dp),
+            )
+        }
+        IconButton(onClick = onToggleKeepScreenOn, modifier = Modifier.size(80.dp)) {
+            Icon(
+                if (keepScreenOn) Icons.Filled.Visibility else Icons.Filled.VisibilityOff,
+                contentDescription = stringResource(
+                    if (keepScreenOn) R.string.action_keep_screen_on_off else R.string.action_keep_screen_on,
+                ),
+                modifier = Modifier.size(36.dp),
             )
         }
     }

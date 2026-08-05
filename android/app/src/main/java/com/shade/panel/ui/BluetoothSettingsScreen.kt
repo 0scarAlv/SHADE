@@ -41,6 +41,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.viewmodel.compose.LocalViewModelStoreOwner
 import com.shade.panel.R
 import com.shade.panel.data.ShadePreferences
 import com.shade.panel.data.Transport
@@ -53,6 +54,12 @@ import com.shade.panel.ui.theme.PanelSurface
 fun BluetoothSettingsScreen(onBack: () -> Unit) {
     val context = LocalContext.current
     val preferences = remember { ShadePreferences(context) }
+    // PanelViewModel (and the transport it opened) is cached for the whole
+    // Activity — otherwise reopening the player wouldn't pick up a changed
+    // setting at all. This app only ever puts that one ViewModel in this
+    // store, so clearing it here is exactly "forget the old connection,
+    // build a fresh one next time the player opens."
+    val viewModelStoreOwner = LocalViewModelStoreOwner.current
 
     var transport by remember { mutableStateOf(preferences.transport) }
     var selectedAddress by remember { mutableStateOf(preferences.pairedDeviceAddress) }
@@ -82,6 +89,7 @@ fun BluetoothSettingsScreen(onBack: () -> Unit) {
             onClick = {
                 transport = Transport.WEBSOCKET
                 preferences.transport = Transport.WEBSOCKET
+                viewModelStoreOwner?.viewModelStore?.clear()
             },
         )
         Spacer(Modifier.height(12.dp))
@@ -91,6 +99,7 @@ fun BluetoothSettingsScreen(onBack: () -> Unit) {
             onClick = {
                 transport = Transport.BLUETOOTH
                 preferences.transport = Transport.BLUETOOTH
+                viewModelStoreOwner?.viewModelStore?.clear()
             },
         )
 
@@ -123,6 +132,7 @@ fun BluetoothSettingsScreen(onBack: () -> Unit) {
                                 onClick = {
                                     selectedAddress = device.address
                                     preferences.pairedDeviceAddress = device.address
+                                    viewModelStoreOwner?.viewModelStore?.clear()
                                 },
                             )
                         }

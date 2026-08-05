@@ -19,8 +19,15 @@ class ShadePreferences(context: Context) {
         get() = prefs.getString(KEY_DEVICE_ADDRESS, null)
         set(value) = prefs.edit { putString(KEY_DEVICE_ADDRESS, value) }
 
+    // Panel use case: the phone usually sits mounted, so keeping the screen
+    // awake is opt-in rather than forced on — see PanelScreen's toggle.
+    var keepScreenOn: Boolean
+        get() = prefs.getBoolean(KEY_KEEP_SCREEN_ON, false)
+        set(value) = prefs.edit { putBoolean(KEY_KEEP_SCREEN_ON, value) }
+
     private companion object {
         const val KEY_TRANSPORT = "transport"
         const val KEY_DEVICE_ADDRESS = "device_address"
+        const val KEY_KEEP_SCREEN_ON = "keep_screen_on"
     }
 }
