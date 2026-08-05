@@ -17,8 +17,13 @@ public sealed class AdbReverseWatchdog : BackgroundService
     public AdbReverseWatchdog(IConfiguration configuration, ILogger<AdbReverseWatchdog> logger)
     {
         _logger = logger;
-        _adbPath = configuration["Adb:Path"]
+        var configuredPath = configuration["Adb:Path"]
             ?? throw new InvalidOperationException("Falta 'Adb:Path' en la configuración.");
+        // Relative paths resolve against the agent's own install dir, so a
+        // bundled adb (tools/adb/adb.exe) works regardless of where it's installed.
+        _adbPath = Path.IsPathRooted(configuredPath)
+            ? configuredPath
+            : Path.Combine(AppContext.BaseDirectory, configuredPath);
         _checkInterval = TimeSpan.FromSeconds(configuration.GetValue("Adb:CheckIntervalSeconds", 5));
     }
 

@@ -12,4 +12,8 @@
     <PackageReference Include="NAudio" Version="2.3.0" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Content Include="tools\adb\**" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>
