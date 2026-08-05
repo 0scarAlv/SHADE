@@ -7,8 +7,8 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.gestures.detectDragGestures
-import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -230,27 +230,25 @@ private fun SpectrumProgress(uiState: PanelUiState, onSeek: (Long) -> Unit) {
             modifier = Modifier
                 .fillMaxWidth()
                 .height(56.dp)
+                // Tap-or-drag in one gesture loop: two separate pointerInput blocks
+                // (one with detectTapGestures, one with detectDragGestures) fight over
+                // the same pointer stream and drag never wins, so both are handled here
+                // together — down starts the scrub, every move updates it, up commits it.
                 .pointerInput(durationMs) {
                     if (durationMs <= 0) return@pointerInput
-                    detectTapGestures { offset ->
-                        onSeek(((offset.x / size.width).coerceIn(0f, 1f) * durationMs).toLong())
-                    }
-                }
-                .pointerInput(durationMs) {
-                    if (durationMs <= 0) return@pointerInput
-                    detectDragGestures(
-                        onDragStart = { offset ->
-                            isDragging = true
-                            dragFraction = (offset.x / size.width).coerceIn(0f, 1f)
-                        },
-                        onDragEnd = {
-                            onSeek((dragFraction * durationMs).toLong())
-                            isDragging = false
-                        },
-                        onDragCancel = { isDragging = false },
-                    ) { change, _ ->
-                        change.consume()
-                        dragFraction = (change.position.x / size.width).coerceIn(0f, 1f)
+                    awaitEachGesture {
+                        val down = awaitFirstDown()
+                        isDragging = true
+                        dragFraction = (down.position.x / size.width).coerceIn(0f, 1f)
+                        while (true) {
+                            val event = awaitPointerEvent()
+                            val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                            change.consume()
+                            dragFraction = (change.position.x / size.width).coerceIn(0f, 1f)
+                            if (!change.pressed) break
+                        }
+                        onSeek((dragFraction * durationMs).toLong())
+                        isDragging = false
                     }
                 },
         ) {
