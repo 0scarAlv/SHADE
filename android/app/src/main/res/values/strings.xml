@@ -23,4 +23,5 @@
     <string name="connection_no_bonded_devices">No hay dispositivos Bluetooth emparejados. Emparejá la PC primero desde los ajustes de Bluetooth del sistema.</string>
     <string name="connection_paired_devices">Dispositivos emparejados</string>
     <string name="connection_selected_badge">PC seleccionada</string>
+    <string name="no_lyrics_available">Sin letra disponible</string>
 </resources>

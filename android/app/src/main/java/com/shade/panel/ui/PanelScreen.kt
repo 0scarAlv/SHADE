@@ -1,15 +1,16 @@
 package com.shade.panel.ui
 
-import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.togetherWith
 import android.content.Context
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -50,10 +51,12 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalView
@@ -127,7 +130,7 @@ fun PanelScreen(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(32.dp),
             ) {
-                AlbumArt(uiState.artBytes ?: uiState.artUrl, size = availableHeight - 48.dp)
+                AlbumArt(uiState.artBytes ?: uiState.artUrl, size = availableHeight - 48.dp, lyricsLine = uiState.currentLyricsLine)
                 Column(
                     modifier = Modifier
                         .fillMaxHeight()
@@ -160,7 +163,7 @@ fun PanelScreen(
             ) {
                 ConnectionBadge(uiState.connection)
                 Spacer(Modifier.height(20.dp))
-                AlbumArt(uiState.artBytes ?: uiState.artUrl, size = 240.dp)
+                AlbumArt(uiState.artBytes ?: uiState.artUrl, size = 240.dp, lyricsLine = uiState.currentLyricsLine)
                 Spacer(Modifier.height(20.dp))
                 TrackInfo(uiState, textAlign = TextAlign.Center)
                 Spacer(Modifier.height(16.dp))
@@ -186,23 +189,58 @@ fun PanelScreen(
     }
 }
 
+// Double-tap toggles a blurred cover with the current lyric line over it —
+// lets people who want lyrics have them without the info block below
+// growing/shrinking every time a line changes (see TrackInfo), and people
+// who don't want them just never double-tap.
 @Composable
-private fun AlbumArt(art: Any?, size: Dp) {
-    AsyncImage(
-        model = art,
-        contentDescription = null,
+private fun AlbumArt(art: Any?, size: Dp, lyricsLine: String?) {
+    var lyricsVisible by remember { mutableStateOf(false) }
+
+    Box(
         modifier = Modifier
             .size(size)
-            .clip(RoundedCornerShape(16.dp)),
-        contentScale = ContentScale.Crop,
-    )
+            .clip(RoundedCornerShape(16.dp))
+            .pointerInput(Unit) {
+                detectTapGestures(onDoubleTap = { lyricsVisible = !lyricsVisible })
+            },
+    ) {
+        AsyncImage(
+            model = art,
+            contentDescription = null,
+            modifier = Modifier
+                .fillMaxSize()
+                .then(if (lyricsVisible) Modifier.blur(20.dp) else Modifier),
+            contentScale = ContentScale.Crop,
+        )
+        AnimatedVisibility(
+            visible = lyricsVisible,
+            enter = fadeIn(tween(220)),
+            exit = fadeOut(tween(220)),
+            modifier = Modifier.fillMaxSize(),
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.35f)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = lyricsLine?.takeIf { it.isNotBlank() } ?: stringResource(R.string.no_lyrics_available),
+                    style = MaterialTheme.typography.titleMedium,
+                    fontStyle = FontStyle.Italic,
+                    color = Color.White,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(20.dp),
+                )
+            }
+        }
+    }
 }
 
-// Every line is locked to a fixed number of lines (title/artist/album to 1,
-// lyrics to always reserving 2 via minLines) so the block's total height
-// never changes as text comes and goes — otherwise everything below it
-// (progress, controls, volume) visibly jumps every time the lyric line or
-// the track changes.
+// Every line is locked to a single line (maxLines = 1) so the block's total
+// height never changes as text comes and goes — otherwise everything below
+// it (progress, controls, volume) visibly jumps every time the track changes.
 @Composable
 private fun TrackInfo(uiState: PanelUiState, textAlign: TextAlign) {
     // fillMaxWidth is what actually keeps this block still — maxLines alone
@@ -237,23 +275,6 @@ private fun TrackInfo(uiState: PanelUiState, textAlign: TextAlign) {
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
-        Spacer(Modifier.height(12.dp))
-        AnimatedContent(
-            targetState = uiState.currentLyricsLine.orEmpty(),
-            transitionSpec = { (fadeIn(tween(220)) togetherWith fadeOut(tween(220))) },
-            label = "lyrics-line",
-        ) { line ->
-            Text(
-                text = line,
-                style = MaterialTheme.typography.bodyLarge,
-                fontStyle = FontStyle.Italic,
-                color = MaterialTheme.colorScheme.primary,
-                textAlign = textAlign,
-                minLines = 2,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
     }
 }
 
