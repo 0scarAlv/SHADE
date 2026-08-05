@@ -29,7 +29,7 @@ import okhttp3.WebSocketListener
 class ShadeSocket(
     private val url: String = "ws://127.0.0.1:8080",
     private val client: OkHttpClient = OkHttpClient(),
-) {
+) : ShadeTransport {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     // encodeDefaults is required: without it, CommandMessage.type (which uses
     // a default value of "cmd") gets silently dropped from the outgoing JSON,
@@ -44,33 +44,38 @@ class ShadeSocket(
     private var reconnectDelayMs = INITIAL_RECONNECT_DELAY_MS
 
     private val _connectionState = MutableStateFlow(ConnectionState.DISCONNECTED)
-    val connectionState: StateFlow<ConnectionState> = _connectionState.asStateFlow()
+    override val connectionState: StateFlow<ConnectionState> = _connectionState.asStateFlow()
 
     private val _trackUpdates = MutableSharedFlow<TrackMessage>(extraBufferCapacity = 1)
-    val trackUpdates: SharedFlow<TrackMessage> = _trackUpdates.asSharedFlow()
+    override val trackUpdates: SharedFlow<TrackMessage> = _trackUpdates.asSharedFlow()
 
     private val _stateUpdates = MutableSharedFlow<StateMessage>(extraBufferCapacity = 1)
-    val stateUpdates: SharedFlow<StateMessage> = _stateUpdates.asSharedFlow()
+    override val stateUpdates: SharedFlow<StateMessage> = _stateUpdates.asSharedFlow()
 
     private val _lyricsUpdates = MutableSharedFlow<LyricsMessage>(extraBufferCapacity = 1)
-    val lyricsUpdates: SharedFlow<LyricsMessage> = _lyricsUpdates.asSharedFlow()
+    override val lyricsUpdates: SharedFlow<LyricsMessage> = _lyricsUpdates.asSharedFlow()
 
     private val _spectrumUpdates = MutableSharedFlow<SpectrumMessage>(extraBufferCapacity = 1)
-    val spectrumUpdates: SharedFlow<SpectrumMessage> = _spectrumUpdates.asSharedFlow()
+    override val spectrumUpdates: SharedFlow<SpectrumMessage> = _spectrumUpdates.asSharedFlow()
 
-    fun connect() {
+    // Cover art arrives over HTTP GET /art/{hash} for this transport (see
+    // PanelViewModel's artUrl), never pushed — this flow simply never emits.
+    private val _artUpdates = MutableSharedFlow<ArtPayload>(extraBufferCapacity = 1)
+    override val artUpdates: SharedFlow<ArtPayload> = _artUpdates.asSharedFlow()
+
+    override fun connect() {
         reconnectJob?.cancel()
         _connectionState.value = ConnectionState.CONNECTING
         webSocket = client.newWebSocket(Request.Builder().url(url).build(), listener)
     }
 
-    fun disconnect() {
+    override fun disconnect() {
         reconnectJob?.cancel()
         webSocket?.close(NORMAL_CLOSURE_CODE, null)
         webSocket = null
     }
 
-    fun sendCommand(action: String, value: Double? = null) {
+    override fun sendCommand(action: String, value: Double?) {
         webSocket?.send(json.encodeToString(CommandMessage.serializer(), CommandMessage(action = action, value = value)))
     }
 

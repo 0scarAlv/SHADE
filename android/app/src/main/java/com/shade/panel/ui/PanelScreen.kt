@@ -5,6 +5,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
+import android.content.Context
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -58,17 +59,43 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.lifecycle.viewmodel.initializer
+import androidx.lifecycle.viewmodel.viewModelFactory
 import coil3.compose.AsyncImage
 import com.shade.panel.R
 import com.shade.panel.data.ConnectionState
+import com.shade.panel.data.ShadeBluetoothTransport
+import com.shade.panel.data.ShadePreferences
+import com.shade.panel.data.ShadeSocket
+import com.shade.panel.data.ShadeTransport
+import com.shade.panel.data.Transport
 import com.shade.panel.ui.theme.PanelError
 import com.shade.panel.ui.theme.PanelOnBackgroundMuted
 import com.shade.panel.ui.theme.PanelSpectrumIdle
 import com.shade.panel.ui.theme.PanelWarning
 
+// Picks the transport based on the user's saved preference (see
+// BluetoothSettingsScreen) so PanelViewModel doesn't need to know how it's
+// being reached — USB/WebSocket by default, Bluetooth once a PC is paired.
+private fun panelViewModelFactory(context: Context) = viewModelFactory {
+    initializer {
+        val preferences = ShadePreferences(context)
+        val transport: ShadeTransport = if (preferences.transport == Transport.BLUETOOTH) {
+            ShadeBluetoothTransport(context) { preferences.pairedDeviceAddress }
+        } else {
+            ShadeSocket()
+        }
+        PanelViewModel(transport)
+    }
+}
+
 @Composable
-fun PanelScreen(viewModel: PanelViewModel = viewModel(), onBack: () -> Unit = {}) {
+fun PanelScreen(
+    viewModel: PanelViewModel = viewModel(factory = panelViewModelFactory(LocalContext.current)),
+    onBack: () -> Unit = {},
+) {
     val uiState by viewModel.uiState.collectAsState()
 
     BackHandler(onBack = onBack)
@@ -85,7 +112,7 @@ fun PanelScreen(viewModel: PanelViewModel = viewModel(), onBack: () -> Unit = {}
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(32.dp),
             ) {
-                AlbumArt(uiState.artUrl, size = availableHeight - 48.dp)
+                AlbumArt(uiState.artBytes ?: uiState.artUrl, size = availableHeight - 48.dp)
                 Column(
                     modifier = Modifier
                         .fillMaxHeight()
@@ -115,7 +142,7 @@ fun PanelScreen(viewModel: PanelViewModel = viewModel(), onBack: () -> Unit = {}
             ) {
                 ConnectionBadge(uiState.connection)
                 Spacer(Modifier.height(20.dp))
-                AlbumArt(uiState.artUrl, size = 240.dp)
+                AlbumArt(uiState.artBytes ?: uiState.artUrl, size = 240.dp)
                 Spacer(Modifier.height(20.dp))
                 TrackInfo(uiState, textAlign = TextAlign.Center)
                 Spacer(Modifier.height(16.dp))
@@ -134,9 +161,9 @@ fun PanelScreen(viewModel: PanelViewModel = viewModel(), onBack: () -> Unit = {}
 }
 
 @Composable
-private fun AlbumArt(artUrl: String?, size: Dp) {
+private fun AlbumArt(art: Any?, size: Dp) {
     AsyncImage(
-        model = artUrl,
+        model = art,
         contentDescription = null,
         modifier = Modifier
             .size(size)

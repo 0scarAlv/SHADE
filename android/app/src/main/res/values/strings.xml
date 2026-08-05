@@ -12,5 +12,13 @@
     <string name="action_volume_down">Bajar volumen</string>
     <string name="action_back">Atrás</string>
     <string name="tile_player">Reproductor</string>
+    <string name="tile_connection">Conexión</string>
     <string name="tile_coming_soon">Próximamente</string>
+    <string name="connection_title">Conexión</string>
+    <string name="connection_transport_usb">USB (desarrollo)</string>
+    <string name="connection_transport_bluetooth">Bluetooth</string>
+    <string name="connection_grant_permission">Conceder permiso de Bluetooth</string>
+    <string name="connection_no_bonded_devices">No hay dispositivos Bluetooth emparejados. Emparejá la PC primero desde los ajustes de Bluetooth del sistema.</string>
+    <string name="connection_paired_devices">Dispositivos emparejados</string>
+    <string name="connection_selected_badge">PC seleccionada</string>
 </resources>
