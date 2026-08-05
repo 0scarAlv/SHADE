@@ -1,7 +1,6 @@
-using System.Net.WebSockets;
-using System.Text.Json;
 using Shade.Agent.Adb;
 using Shade.Agent.Audio;
+using Shade.Agent.Bluetooth;
 using Shade.Agent.Lyrics;
 using Shade.Agent.Protocol;
 using Shade.Agent.Smtc;
@@ -17,6 +16,8 @@ builder.Services.AddSingleton<SystemVolumeController>();
 builder.Services.AddSingleton<SpectrumAnalyzer>();
 builder.Services.AddSingleton<LyricsProvider>();
 builder.Services.AddHostedService<AdbReverseWatchdog>();
+builder.Services.AddSingleton<RfcommServer>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<RfcommServer>());
 
 var app = builder.Build();
 
@@ -26,6 +27,7 @@ var clientHub = app.Services.GetRequiredService<ClientHub>();
 var volumeController = app.Services.GetRequiredService<SystemVolumeController>();
 var spectrumAnalyzer = app.Services.GetRequiredService<SpectrumAnalyzer>();
 var lyricsProvider = app.Services.GetRequiredService<LyricsProvider>();
+var rfcommServer = app.Services.GetRequiredService<RfcommServer>();
 var logger = app.Services.GetRequiredService<ILogger<Program>>();
 
 string? lastLyricsKey = null;
@@ -34,7 +36,12 @@ LyricsMessage? currentLyrics = null;
 smtc.TrackChanged += track =>
 {
     if (track.ArtBytes is not null && track.ArtHash is not null && track.ArtContentType is not null)
+    {
         artCache.Store(track.ArtHash, track.ArtBytes, track.ArtContentType);
+        // WebSocket clients fetch art over HTTP GET /art/{hash} instead; this
+        // only reaches Bluetooth-connected clients (no-op otherwise).
+        _ = clientHub.BroadcastArtAsync(track.ArtHash, track.ArtBytes, track.ArtContentType);
+    }
 
     _ = clientHub.BroadcastAsync(new TrackMessage(
         track.Title, track.Artist, track.Album, track.DurationMs, track.ArtHash));
@@ -88,6 +95,30 @@ async Task FetchAndBroadcastLyricsAsync(TrackInfo track)
     await clientHub.BroadcastAsync(message);
 }
 
+// A client that just (re)connected needs to be caught up immediately —
+// otherwise it's blind until the next real SMTC change, which can take
+// minutes. Shared by both transports.
+async Task SendCatchUpAsync(IClientConnection connection, CancellationToken ct)
+{
+    if (smtc.CurrentTrack is { } track)
+    {
+        await clientHub.SendToAsync(connection, new TrackMessage(
+            track.Title, track.Artist, track.Album, track.DurationMs, track.ArtHash), ct);
+        if (track.ArtBytes is not null && track.ArtHash is not null && track.ArtContentType is not null)
+            await connection.SendArtAsync(track.ArtHash, track.ArtContentType, track.ArtBytes, ct);
+    }
+    if (smtc.CurrentState is { } state)
+    {
+        await clientHub.SendToAsync(connection, new StateMessage(state.Playing, state.PositionMs, state.TimestampMs, volumeController.GetVolume()), ct);
+    }
+    if (currentLyrics is { } lyrics)
+    {
+        await clientHub.SendToAsync(connection, lyrics, ct);
+    }
+}
+
+rfcommServer.ClientConnected += connection => SendCatchUpAsync(connection, CancellationToken.None);
+
 await smtc.StartAsync();
 
 app.UseWebSockets();
@@ -100,30 +131,15 @@ app.MapGet("/", async (HttpContext context) =>
         return;
     }
 
-    using var socket = await context.WebSockets.AcceptWebSocketAsync();
+    var socket = await context.WebSockets.AcceptWebSocketAsync();
+    IClientConnection connection = new WebSocketClientConnection(socket, logger);
+    clientHub.Register(connection);
 
-    // A client that just (re)connected needs to be caught up immediately —
-    // otherwise it's blind until the next real SMTC change, which can take
-    // minutes.
-    if (smtc.CurrentTrack is { } track)
-    {
-        await clientHub.SendToAsync(socket, new TrackMessage(
-            track.Title, track.Artist, track.Album, track.DurationMs, track.ArtHash),
-            context.RequestAborted);
-    }
-    if (smtc.CurrentState is { } state)
-    {
-        await clientHub.SendToAsync(socket, new StateMessage(state.Playing, state.PositionMs, state.TimestampMs, volumeController.GetVolume()),
-            context.RequestAborted);
-    }
-    if (currentLyrics is { } lyrics)
-    {
-        await clientHub.SendToAsync(socket, lyrics, context.RequestAborted);
-    }
+    await SendCatchUpAsync(connection, context.RequestAborted);
 
-    await clientHub.HandleClientAsync(
-        socket,
-        json => HandleCommandAsync(json, smtc, volumeController, logger),
+    await clientHub.PumpAsync(
+        connection,
+        json => CommandHandler.HandleAsync(json, smtc, volumeController, logger),
         context.RequestAborted);
 });
 
@@ -136,49 +152,3 @@ app.MapGet("/art/{hash}", (string hash) =>
 });
 
 app.Run();
-
-static async Task HandleCommandAsync(string json, SmtcSessionWatcher smtc, SystemVolumeController volumeController, ILogger logger)
-{
-    IncomingCommand? command;
-    try
-    {
-        command = JsonSerializer.Deserialize<IncomingCommand>(json, ShadeJson.Options);
-    }
-    catch (JsonException ex)
-    {
-        logger.LogWarning(ex, "Comando con JSON inválido: {Json}", json);
-        return;
-    }
-
-    if (command is not { Type: "cmd" })
-    {
-        logger.LogWarning("Mensaje ignorado (tipo inesperado): {Json}", json);
-        return;
-    }
-
-    switch (command.Action)
-    {
-        case "playPause":
-            await smtc.TryPlayPauseAsync();
-            break;
-        case "next":
-            await smtc.TryNextAsync();
-            break;
-        case "prev":
-            await smtc.TryPreviousAsync();
-            break;
-        case "volumeUp":
-            volumeController.VolumeUp();
-            break;
-        case "volumeDown":
-            volumeController.VolumeDown();
-            break;
-        case "seek":
-            if (command.Value is { } positionMs)
-                await smtc.TrySeekAsync((long)positionMs);
-            break;
-        default:
-            logger.LogInformation("Acción '{Action}' desconocida.", command.Action);
-            break;
-    }
-}
