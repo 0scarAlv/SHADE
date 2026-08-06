@@ -16,6 +16,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Bluetooth
 import androidx.compose.material.icons.filled.MusicNote
+import androidx.compose.material.icons.filled.SwipeUp
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
@@ -38,7 +39,7 @@ private const val TOTAL_TILES = 6
 // placeholders reserved for whatever gets built next (clock, notifications,
 // quick actions, ...). Adaptive columns so it reflows sanely in landscape too.
 @Composable
-fun HomeScreen(onOpenPlayer: () -> Unit, onOpenConnection: () -> Unit) {
+fun HomeScreen(onOpenPlayer: () -> Unit, onOpenConnection: () -> Unit, onOpenGestureSettings: () -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -72,7 +73,15 @@ fun HomeScreen(onOpenPlayer: () -> Unit, onOpenConnection: () -> Unit) {
                     onClick = onOpenConnection,
                 )
             }
-            items(TOTAL_TILES - 2) {
+            item {
+                HomeTile(
+                    title = stringResource(R.string.tile_gestures),
+                    icon = Icons.Filled.SwipeUp,
+                    enabled = true,
+                    onClick = onOpenGestureSettings,
+                )
+            }
+            items(TOTAL_TILES - 3) {
                 HomeTile(
                     title = stringResource(R.string.tile_coming_soon),
                     icon = Icons.Filled.Add,

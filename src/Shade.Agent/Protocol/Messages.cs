@@ -35,6 +35,18 @@ public sealed record SpectrumMessage(float[] Bands)
     public string Type => "spectrum";
 }
 
+public sealed record ResourceMessage(
+    long RamUsedBytes,
+    long RamTotalBytes,
+    double NetDownBytesPerSec,
+    double NetUpBytesPerSec,
+    bool HasBattery,
+    int? BatteryPercent,
+    bool? BatteryCharging)
+{
+    public string Type => "resource";
+}
+
 // App -> Agent
 
 public sealed record IncomingCommand(string Type, string Action, double? Value);

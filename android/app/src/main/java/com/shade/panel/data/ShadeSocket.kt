@@ -58,6 +58,9 @@ class ShadeSocket(
     private val _spectrumUpdates = MutableSharedFlow<SpectrumMessage>(extraBufferCapacity = 1)
     override val spectrumUpdates: SharedFlow<SpectrumMessage> = _spectrumUpdates.asSharedFlow()
 
+    private val _resourceUpdates = MutableSharedFlow<ResourceMessage>(extraBufferCapacity = 1)
+    override val resourceUpdates: SharedFlow<ResourceMessage> = _resourceUpdates.asSharedFlow()
+
     // Cover art arrives over HTTP GET /art/{hash} for this transport (see
     // PanelViewModel's artUrl), never pushed — this flow simply never emits.
     private val _artUpdates = MutableSharedFlow<ArtPayload>(extraBufferCapacity = 1)
@@ -96,6 +99,8 @@ class ShadeSocket(
                     .onSuccess { _lyricsUpdates.tryEmit(it) }
                 "spectrum" -> runCatching { json.decodeFromJsonElement(SpectrumMessage.serializer(), element) }
                     .onSuccess { _spectrumUpdates.tryEmit(it) }
+                "resource" -> runCatching { json.decodeFromJsonElement(ResourceMessage.serializer(), element) }
+                    .onSuccess { _resourceUpdates.tryEmit(it) }
             }
         }
 

@@ -5,6 +5,7 @@ using Shade.Agent.Lyrics;
 using Shade.Agent.Protocol;
 using Shade.Agent.Smtc;
 using Shade.Agent.Streaming;
+using Shade.Agent.SystemMonitor;
 
 var builder = WebApplication.CreateBuilder(args);
 builder.WebHost.UseUrls("http://127.0.0.1:8080");
@@ -18,6 +19,8 @@ builder.Services.AddSingleton<LyricsProvider>();
 builder.Services.AddHostedService<AdbReverseWatchdog>();
 builder.Services.AddSingleton<RfcommServer>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<RfcommServer>());
+builder.Services.AddSingleton<ResourceMonitorService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<ResourceMonitorService>());
 
 var app = builder.Build();
 
@@ -28,10 +31,12 @@ var volumeController = app.Services.GetRequiredService<SystemVolumeController>()
 var spectrumAnalyzer = app.Services.GetRequiredService<SpectrumAnalyzer>();
 var lyricsProvider = app.Services.GetRequiredService<LyricsProvider>();
 var rfcommServer = app.Services.GetRequiredService<RfcommServer>();
+var resourceMonitor = app.Services.GetRequiredService<ResourceMonitorService>();
 var logger = app.Services.GetRequiredService<ILogger<Program>>();
 
 string? lastLyricsKey = null;
 LyricsMessage? currentLyrics = null;
+ResourceMessage? currentResource = null;
 
 smtc.TrackChanged += track =>
 {
@@ -85,6 +90,15 @@ volumeController.VolumeChanged += () =>
 };
 
 spectrumAnalyzer.SpectrumAvailable += bands => _ = clientHub.BroadcastAsync(new SpectrumMessage(bands));
+
+resourceMonitor.SampleAvailable += sample =>
+{
+    currentResource = new ResourceMessage(
+        sample.RamUsedBytes, sample.RamTotalBytes,
+        sample.NetDownBytesPerSec, sample.NetUpBytesPerSec,
+        sample.HasBattery, sample.BatteryPercent, sample.BatteryCharging);
+    _ = clientHub.BroadcastAsync(currentResource);
+};
 
 async Task FetchAndBroadcastLyricsAsync(TrackInfo track)
 {
@@ -141,6 +155,10 @@ async Task SendCatchUpAsync(IClientConnection connection, CancellationToken ct)
     if (currentLyrics is { } lyrics)
     {
         await clientHub.SendToAsync(connection, lyrics, ct);
+    }
+    if (currentResource is { } resource)
+    {
+        await clientHub.SendToAsync(connection, resource, ct);
     }
 }
 

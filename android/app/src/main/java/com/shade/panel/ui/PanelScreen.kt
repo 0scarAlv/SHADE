@@ -5,7 +5,6 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import android.content.Context
-import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -28,7 +27,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.VolumeDown
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.Pause
@@ -86,7 +84,7 @@ import com.shade.panel.ui.theme.PanelWarning
 // Picks the transport based on the user's saved preference (see
 // BluetoothSettingsScreen) so PanelViewModel doesn't need to know how it's
 // being reached — USB/WebSocket by default, Bluetooth once a PC is paired.
-private fun panelViewModelFactory(context: Context) = viewModelFactory {
+fun panelViewModelFactory(context: Context) = viewModelFactory {
     initializer {
         val preferences = ShadePreferences(context)
         val transport: ShadeTransport = if (preferences.transport == Transport.BLUETOOTH) {
@@ -101,14 +99,11 @@ private fun panelViewModelFactory(context: Context) = viewModelFactory {
 @Composable
 fun PanelScreen(
     viewModel: PanelViewModel = viewModel(factory = panelViewModelFactory(LocalContext.current)),
-    onBack: () -> Unit = {},
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val context = LocalContext.current
     val preferences = remember { ShadePreferences(context) }
     var keepScreenOn by remember { mutableStateOf(preferences.keepScreenOn) }
-
-    BackHandler(onBack = onBack)
 
     // Plain window flag, no permission involved — only keeps the screen on
     // while this screen is visible, and only while the toggle is on.
@@ -176,15 +171,6 @@ fun PanelScreen(
                     preferences.keepScreenOn = keepScreenOn
                 }
             }
-        }
-
-        // Top-right (and lower than the very edge) instead of top-left: easier
-        // to reach with a thumb once the phone is mounted as a fixed panel.
-        IconButton(
-            onClick = onBack,
-            modifier = Modifier.align(Alignment.TopEnd).padding(top = 56.dp, end = 8.dp).size(48.dp),
-        ) {
-            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.action_back))
         }
     }
 }

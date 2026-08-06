@@ -11,6 +11,7 @@ interface ShadeTransport {
     val stateUpdates: SharedFlow<StateMessage>
     val lyricsUpdates: SharedFlow<LyricsMessage>
     val spectrumUpdates: SharedFlow<SpectrumMessage>
+    val resourceUpdates: SharedFlow<ResourceMessage>
 
     // Only ever emitted by the Bluetooth transport — WebSocket clients fetch
     // art over HTTP instead, so ShadeSocket's flow simply never fires.
