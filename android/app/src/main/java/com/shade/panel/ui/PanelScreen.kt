@@ -1,14 +1,16 @@
 package com.shade.panel.ui
 
-import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.togetherWith
+import android.content.Context
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -33,11 +35,14 @@ import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -46,32 +51,72 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.lifecycle.viewmodel.initializer
+import androidx.lifecycle.viewmodel.viewModelFactory
 import coil3.compose.AsyncImage
 import com.shade.panel.R
 import com.shade.panel.data.ConnectionState
+import com.shade.panel.data.ShadeBluetoothTransport
+import com.shade.panel.data.ShadePreferences
+import com.shade.panel.data.ShadeSocket
+import com.shade.panel.data.ShadeTransport
+import com.shade.panel.data.Transport
 import com.shade.panel.ui.theme.PanelError
 import com.shade.panel.ui.theme.PanelOnBackgroundMuted
 import com.shade.panel.ui.theme.PanelSpectrumIdle
 import com.shade.panel.ui.theme.PanelWarning
 
+// Picks the transport based on the user's saved preference (see
+// BluetoothSettingsScreen) so PanelViewModel doesn't need to know how it's
+// being reached — USB/WebSocket by default, Bluetooth once a PC is paired.
+private fun panelViewModelFactory(context: Context) = viewModelFactory {
+    initializer {
+        val preferences = ShadePreferences(context)
+        val transport: ShadeTransport = if (preferences.transport == Transport.BLUETOOTH) {
+            ShadeBluetoothTransport(context) { preferences.pairedDeviceAddress }
+        } else {
+            ShadeSocket()
+        }
+        PanelViewModel(transport)
+    }
+}
+
 @Composable
-fun PanelScreen(viewModel: PanelViewModel = viewModel(), onBack: () -> Unit = {}) {
+fun PanelScreen(
+    viewModel: PanelViewModel = viewModel(factory = panelViewModelFactory(LocalContext.current)),
+    onBack: () -> Unit = {},
+) {
     val uiState by viewModel.uiState.collectAsState()
+    val context = LocalContext.current
+    val preferences = remember { ShadePreferences(context) }
+    var keepScreenOn by remember { mutableStateOf(preferences.keepScreenOn) }
 
     BackHandler(onBack = onBack)
+
+    // Plain window flag, no permission involved — only keeps the screen on
+    // while this screen is visible, and only while the toggle is on.
+    val view = LocalView.current
+    DisposableEffect(keepScreenOn) {
+        view.keepScreenOn = keepScreenOn
+        onDispose { view.keepScreenOn = false }
+    }
 
     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
         val isLandscape = maxWidth > maxHeight
@@ -85,7 +130,7 @@ fun PanelScreen(viewModel: PanelViewModel = viewModel(), onBack: () -> Unit = {}
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(32.dp),
             ) {
-                AlbumArt(uiState.artUrl, size = availableHeight - 48.dp)
+                AlbumArt(uiState.artBytes ?: uiState.artUrl, size = availableHeight - 48.dp, lyricsLine = uiState.currentLyricsLine)
                 Column(
                     modifier = Modifier
                         .fillMaxHeight()
@@ -101,8 +146,11 @@ fun PanelScreen(viewModel: PanelViewModel = viewModel(), onBack: () -> Unit = {}
                     SpectrumProgress(uiState, onSeek = viewModel::seek)
                     Spacer(Modifier.height(20.dp))
                     ControlsRow(uiState, viewModel)
-                    Spacer(Modifier.height(12.dp))
-                    VolumeRow(uiState, viewModel)
+                    Spacer(Modifier.height(4.dp))
+                    VolumeRow(uiState, viewModel, keepScreenOn) {
+                        keepScreenOn = !keepScreenOn
+                        preferences.keepScreenOn = keepScreenOn
+                    }
                 }
             }
         } else {
@@ -115,41 +163,84 @@ fun PanelScreen(viewModel: PanelViewModel = viewModel(), onBack: () -> Unit = {}
             ) {
                 ConnectionBadge(uiState.connection)
                 Spacer(Modifier.height(20.dp))
-                AlbumArt(uiState.artUrl, size = 240.dp)
+                AlbumArt(uiState.artBytes ?: uiState.artUrl, size = 240.dp, lyricsLine = uiState.currentLyricsLine)
                 Spacer(Modifier.height(20.dp))
                 TrackInfo(uiState, textAlign = TextAlign.Center)
                 Spacer(Modifier.height(16.dp))
                 SpectrumProgress(uiState, onSeek = viewModel::seek)
                 Spacer(Modifier.height(20.dp))
                 ControlsRow(uiState, viewModel)
-                Spacer(Modifier.height(16.dp))
-                VolumeRow(uiState, viewModel)
+                Spacer(Modifier.height(6.dp))
+                VolumeRow(uiState, viewModel, keepScreenOn) {
+                    keepScreenOn = !keepScreenOn
+                    preferences.keepScreenOn = keepScreenOn
+                }
             }
         }
 
-        IconButton(onClick = onBack, modifier = Modifier.align(Alignment.TopStart).padding(8.dp)) {
+        // Top-right (and lower than the very edge) instead of top-left: easier
+        // to reach with a thumb once the phone is mounted as a fixed panel.
+        IconButton(
+            onClick = onBack,
+            modifier = Modifier.align(Alignment.TopEnd).padding(top = 56.dp, end = 8.dp).size(48.dp),
+        ) {
             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.action_back))
         }
     }
 }
 
+// Double-tap toggles a blurred cover with the current lyric line over it —
+// lets people who want lyrics have them without the info block below
+// growing/shrinking every time a line changes (see TrackInfo), and people
+// who don't want them just never double-tap.
 @Composable
-private fun AlbumArt(artUrl: String?, size: Dp) {
-    AsyncImage(
-        model = artUrl,
-        contentDescription = null,
+private fun AlbumArt(art: Any?, size: Dp, lyricsLine: String?) {
+    var lyricsVisible by remember { mutableStateOf(false) }
+
+    Box(
         modifier = Modifier
             .size(size)
-            .clip(RoundedCornerShape(16.dp)),
-        contentScale = ContentScale.Crop,
-    )
+            .clip(RoundedCornerShape(16.dp))
+            .pointerInput(Unit) {
+                detectTapGestures(onDoubleTap = { lyricsVisible = !lyricsVisible })
+            },
+    ) {
+        AsyncImage(
+            model = art,
+            contentDescription = null,
+            modifier = Modifier
+                .fillMaxSize()
+                .then(if (lyricsVisible) Modifier.blur(20.dp) else Modifier),
+            contentScale = ContentScale.Crop,
+        )
+        AnimatedVisibility(
+            visible = lyricsVisible,
+            enter = fadeIn(tween(220)),
+            exit = fadeOut(tween(220)),
+            modifier = Modifier.fillMaxSize(),
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.35f)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = lyricsLine?.takeIf { it.isNotBlank() } ?: stringResource(R.string.no_lyrics_available),
+                    style = MaterialTheme.typography.titleMedium,
+                    fontStyle = FontStyle.Italic,
+                    color = Color.White,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(20.dp),
+                )
+            }
+        }
+    }
 }
 
-// Every line is locked to a fixed number of lines (title/artist/album to 1,
-// lyrics to always reserving 2 via minLines) so the block's total height
-// never changes as text comes and goes — otherwise everything below it
-// (progress, controls, volume) visibly jumps every time the lyric line or
-// the track changes.
+// Every line is locked to a single line (maxLines = 1) so the block's total
+// height never changes as text comes and goes — otherwise everything below
+// it (progress, controls, volume) visibly jumps every time the track changes.
 @Composable
 private fun TrackInfo(uiState: PanelUiState, textAlign: TextAlign) {
     // fillMaxWidth is what actually keeps this block still — maxLines alone
@@ -184,23 +275,6 @@ private fun TrackInfo(uiState: PanelUiState, textAlign: TextAlign) {
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
-        Spacer(Modifier.height(12.dp))
-        AnimatedContent(
-            targetState = uiState.currentLyricsLine.orEmpty(),
-            transitionSpec = { (fadeIn(tween(220)) togetherWith fadeOut(tween(220))) },
-            label = "lyrics-line",
-        ) { line ->
-            Text(
-                text = line,
-                style = MaterialTheme.typography.bodyLarge,
-                fontStyle = FontStyle.Italic,
-                color = MaterialTheme.colorScheme.primary,
-                textAlign = textAlign,
-                minLines = 2,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
     }
 }
 
@@ -284,55 +358,64 @@ private fun ControlsRow(uiState: PanelUiState, viewModel: PanelViewModel) {
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(24.dp),
     ) {
-        IconButton(onClick = viewModel::prev, modifier = Modifier.size(64.dp)) {
+        IconButton(onClick = viewModel::prev, modifier = Modifier.size(84.dp)) {
             Icon(
                 Icons.Filled.SkipPrevious,
                 contentDescription = stringResource(R.string.action_previous),
-                modifier = Modifier.size(36.dp),
-            )
-        }
-        IconButton(onClick = viewModel::playPause, modifier = Modifier.size(80.dp)) {
-            Icon(
-                imageVector = if (uiState.playing) Icons.Filled.Pause else Icons.Filled.PlayArrow,
-                contentDescription = stringResource(R.string.action_play_pause),
                 modifier = Modifier.size(48.dp),
             )
         }
-        IconButton(onClick = viewModel::next, modifier = Modifier.size(64.dp)) {
+        IconButton(onClick = viewModel::playPause, modifier = Modifier.size(108.dp)) {
+            Icon(
+                imageVector = if (uiState.playing) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                contentDescription = stringResource(R.string.action_play_pause),
+                modifier = Modifier.size(64.dp),
+            )
+        }
+        IconButton(onClick = viewModel::next, modifier = Modifier.size(84.dp)) {
             Icon(
                 Icons.Filled.SkipNext,
                 contentDescription = stringResource(R.string.action_next),
-                modifier = Modifier.size(36.dp),
+                modifier = Modifier.size(48.dp),
             )
         }
     }
 }
 
 @Composable
-private fun VolumeRow(uiState: PanelUiState, viewModel: PanelViewModel) {
+private fun VolumeRow(uiState: PanelUiState, viewModel: PanelViewModel, keepScreenOn: Boolean, onToggleKeepScreenOn: () -> Unit) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        IconButton(onClick = viewModel::volumeDown, modifier = Modifier.size(56.dp)) {
+        IconButton(onClick = viewModel::volumeDown, modifier = Modifier.size(80.dp)) {
             Icon(
                 Icons.AutoMirrored.Filled.VolumeDown,
                 contentDescription = stringResource(R.string.action_volume_down),
-                modifier = Modifier.size(30.dp),
+                modifier = Modifier.size(44.dp),
             )
         }
         Text(
             text = uiState.volume?.let { "${(it * 100).toInt()}%" } ?: "—",
-            style = MaterialTheme.typography.labelLarge,
+            style = MaterialTheme.typography.titleMedium,
             color = PanelOnBackgroundMuted,
-            modifier = Modifier.width(48.dp),
+            modifier = Modifier.width(56.dp),
             textAlign = TextAlign.Center,
         )
-        IconButton(onClick = viewModel::volumeUp, modifier = Modifier.size(56.dp)) {
+        IconButton(onClick = viewModel::volumeUp, modifier = Modifier.size(80.dp)) {
             Icon(
                 Icons.AutoMirrored.Filled.VolumeUp,
                 contentDescription = stringResource(R.string.action_volume_up),
-                modifier = Modifier.size(30.dp),
+                modifier = Modifier.size(44.dp),
+            )
+        }
+        IconButton(onClick = onToggleKeepScreenOn, modifier = Modifier.size(80.dp)) {
+            Icon(
+                if (keepScreenOn) Icons.Filled.Visibility else Icons.Filled.VisibilityOff,
+                contentDescription = stringResource(
+                    if (keepScreenOn) R.string.action_keep_screen_on_off else R.string.action_keep_screen_on,
+                ),
+                modifier = Modifier.size(36.dp),
             )
         }
     }

@@ -14,6 +14,7 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Bluetooth
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -37,7 +38,7 @@ private const val TOTAL_TILES = 6
 // placeholders reserved for whatever gets built next (clock, notifications,
 // quick actions, ...). Adaptive columns so it reflows sanely in landscape too.
 @Composable
-fun HomeScreen(onOpenPlayer: () -> Unit) {
+fun HomeScreen(onOpenPlayer: () -> Unit, onOpenConnection: () -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -63,7 +64,15 @@ fun HomeScreen(onOpenPlayer: () -> Unit) {
                     onClick = onOpenPlayer,
                 )
             }
-            items(TOTAL_TILES - 1) {
+            item {
+                HomeTile(
+                    title = stringResource(R.string.tile_connection),
+                    icon = Icons.Filled.Bluetooth,
+                    enabled = true,
+                    onClick = onOpenConnection,
+                )
+            }
+            items(TOTAL_TILES - 2) {
                 HomeTile(
                     title = stringResource(R.string.tile_coming_soon),
                     icon = Icons.Filled.Add,

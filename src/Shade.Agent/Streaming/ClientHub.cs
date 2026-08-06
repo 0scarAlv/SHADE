@@ -1,17 +1,15 @@
 using System.Collections.Concurrent;
-using System.Net.WebSockets;
-using System.Text;
 using System.Text.Json;
 using Shade.Agent.Protocol;
 
 namespace Shade.Agent.Streaming;
 
-// Tracks connected app sockets and acts as the single broadcast point. One
-// agent can have several clients at once (e.g. the phone and the test page
-// open at the same time), so everything here is 1-to-N.
+// Tracks connected app clients (WebSocket or Bluetooth) and acts as the single
+// broadcast point. One agent can have several clients at once (e.g. the phone
+// and the test page open at the same time), so everything here is 1-to-N.
 public sealed class ClientHub
 {
-    private readonly ConcurrentDictionary<Guid, WebSocket> _clients = new();
+    private readonly ConcurrentDictionary<Guid, IClientConnection> _clients = new();
     private readonly ILogger<ClientHub> _logger;
 
     public ClientHub(ILogger<ClientHub> logger)
@@ -19,77 +17,69 @@ public sealed class ClientHub
         _logger = logger;
     }
 
-    public async Task HandleClientAsync(WebSocket socket, Func<string, Task> onCommand, CancellationToken cancellationToken)
+    public void Register(IClientConnection connection)
     {
-        var id = Guid.NewGuid();
-        _clients[id] = socket;
-        _logger.LogInformation("Cliente conectado ({Id}). Total: {Count}", id, _clients.Count);
+        _clients[connection.Id] = connection;
+        _logger.LogInformation("Cliente conectado ({Id}, {Transport}). Total: {Count}", connection.Id, connection.Transport, _clients.Count);
+    }
 
-        var buffer = new byte[4096];
+    // Reads messages off the connection until it closes, dispatching each one to
+    // onCommand. Same loop for every transport — this is what generalizing
+    // IClientConnection buys us over the old WebSocket-only HandleClientAsync.
+    public async Task PumpAsync(IClientConnection connection, Func<string, Task> onCommand, CancellationToken ct)
+    {
         try
         {
-            while (socket.State == WebSocketState.Open)
+            while (connection.IsOpen)
             {
-                using var message = new MemoryStream();
-                WebSocketReceiveResult result;
-                do
-                {
-                    result = await socket.ReceiveAsync(buffer, cancellationToken);
-                    if (result.MessageType == WebSocketMessageType.Close) break;
-                    message.Write(buffer, 0, result.Count);
-                } while (!result.EndOfMessage);
-
-                if (result.MessageType == WebSocketMessageType.Close) break;
-
-                var text = Encoding.UTF8.GetString(message.ToArray());
-                await onCommand(text);
+                var json = await connection.ReceiveNextMessageAsync(ct);
+                if (json is null) break;
+                await onCommand(json);
             }
-
-            await socket.CloseAsync(WebSocketCloseStatus.NormalClosure, null, cancellationToken);
         }
         catch (OperationCanceledException)
         {
             // The server is shutting down; nothing to do.
         }
-        catch (WebSocketException ex)
+        catch (Exception ex)
         {
-            _logger.LogInformation("Cliente {Id} desconectado: {Message}", id, ex.Message);
+            _logger.LogInformation(ex, "Cliente {Id} desconectado.", connection.Id);
         }
         finally
         {
-            _clients.TryRemove(id, out _);
-            _logger.LogInformation("Cliente desconectado ({Id}). Total: {Count}", id, _clients.Count);
+            _clients.TryRemove(connection.Id, out _);
+            await connection.DisposeAsync();
+            _logger.LogInformation("Cliente desconectado ({Id}). Total: {Count}", connection.Id, _clients.Count);
         }
     }
 
-    public Task BroadcastAsync(object message, CancellationToken cancellationToken = default)
+    public Task BroadcastAsync(object message, CancellationToken ct = default)
     {
         var bytes = Serialize(message);
 
         var sends = _clients.Values
-            .Where(socket => socket.State == WebSocketState.Open)
-            .Select(socket => SendSafeAsync(socket, bytes, cancellationToken));
+            .Where(c => c.IsOpen)
+            .Select(c => c.SendJsonAsync(bytes, ct));
 
         return Task.WhenAll(sends);
     }
 
     // Catches a newly (re)connected client up with the last known track/state,
     // without waiting for the next SMTC change.
-    public Task SendToAsync(WebSocket socket, object message, CancellationToken cancellationToken = default) =>
-        SendSafeAsync(socket, Serialize(message), cancellationToken);
+    public Task SendToAsync(IClientConnection connection, object message, CancellationToken ct = default) =>
+        connection.SendJsonAsync(Serialize(message), ct);
+
+    // Pushes cover art to Bluetooth clients only — WebSocket clients fetch it
+    // over HTTP GET /art/{hash} instead, so SendArtAsync is a no-op for them.
+    public Task BroadcastArtAsync(string hash, byte[] bytes, string contentType, CancellationToken ct = default)
+    {
+        var sends = _clients.Values
+            .Where(c => c.IsOpen && c.Transport == ClientTransport.Bluetooth)
+            .Select(c => c.SendArtAsync(hash, contentType, bytes, ct));
+
+        return Task.WhenAll(sends);
+    }
 
     private static byte[] Serialize(object message) =>
-        Encoding.UTF8.GetBytes(JsonSerializer.Serialize(message, message.GetType(), ShadeJson.Options));
-
-    private async Task SendSafeAsync(WebSocket socket, byte[] bytes, CancellationToken cancellationToken)
-    {
-        try
-        {
-            await socket.SendAsync(bytes, WebSocketMessageType.Text, true, cancellationToken);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Fallo enviando a un cliente, se ignora.");
-        }
-    }
+        JsonSerializer.SerializeToUtf8Bytes(message, message.GetType(), ShadeJson.Options);
 }

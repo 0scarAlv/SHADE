@@ -11,9 +11,12 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import com.shade.panel.ui.BluetoothSettingsScreen
 import com.shade.panel.ui.HomeScreen
 import com.shade.panel.ui.PanelScreen
 import com.shade.panel.ui.theme.ShadeTheme
+
+private enum class Screen { HOME, PLAYER, CONNECTION }
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -24,14 +27,18 @@ class MainActivity : ComponentActivity() {
                 // theme's onBackground — icons/text quietly default to black
                 // and disappear against the dark panel background.
                 Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-                    // No navigation library yet — just Home <-> the one real
-                    // screen. Worth switching to Navigation-Compose once more
-                    // than one of the placeholder tiles actually does something.
-                    var showPlayer by rememberSaveable { mutableStateOf(false) }
-                    if (showPlayer) {
-                        PanelScreen(onBack = { showPlayer = false })
-                    } else {
-                        HomeScreen(onOpenPlayer = { showPlayer = true })
+                    // No navigation library yet — just Home <-> the couple of
+                    // real screens. Worth switching to Navigation-Compose once
+                    // more than one of the placeholder tiles actually does
+                    // something.
+                    var screen by rememberSaveable { mutableStateOf(Screen.HOME) }
+                    when (screen) {
+                        Screen.PLAYER -> PanelScreen(onBack = { screen = Screen.HOME })
+                        Screen.CONNECTION -> BluetoothSettingsScreen(onBack = { screen = Screen.HOME })
+                        Screen.HOME -> HomeScreen(
+                            onOpenPlayer = { screen = Screen.PLAYER },
+                            onOpenConnection = { screen = Screen.CONNECTION },
+                        )
                     }
                 }
             }

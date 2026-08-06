@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.shade.panel.data.ConnectionState
 import com.shade.panel.data.LyricsLine
 import com.shade.panel.data.ShadeSocket
+import com.shade.panel.data.ShadeTransport
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -18,7 +19,9 @@ data class PanelUiState(
     val title: String = "",
     val artist: String = "",
     val album: String = "",
+    val artHash: String? = null,
     val artUrl: String? = null,
+    val artBytes: ByteArray? = null,
     val playing: Boolean = false,
     val positionMs: Long = 0,
     val durationMs: Long = 0,
@@ -30,7 +33,7 @@ data class PanelUiState(
 const val BAND_COUNT = 32
 
 class PanelViewModel(
-    private val socket: ShadeSocket = ShadeSocket(),
+    private val transport: ShadeTransport = ShadeSocket(),
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(PanelUiState())
@@ -46,15 +49,15 @@ class PanelViewModel(
     private var lastTrackKey: String? = null
 
     init {
-        socket.connect()
+        transport.connect()
 
         viewModelScope.launch {
-            socket.connectionState.collect { status ->
+            transport.connectionState.collect { status ->
                 _uiState.update { it.copy(connection = status) }
             }
         }
         viewModelScope.launch {
-            socket.trackUpdates.collect { track ->
+            transport.trackUpdates.collect { track ->
                 // SMTC can re-fire "track changed" several times for the same
                 // song (partial metadata updates). Only wipe the lyrics we
                 // already have when it's actually a different song — otherwise
@@ -72,26 +75,39 @@ class PanelViewModel(
                         artist = track.artist,
                         album = track.album,
                         durationMs = track.durationMs,
+                        artHash = track.artHash,
                         artUrl = track.artHash?.let { hash -> "$ART_BASE_URL/$hash" },
+                        // Cleared until the Bluetooth transport's matching push
+                        // arrives (see artUpdates below) — WebSocket doesn't push
+                        // art at all, it just uses artUrl above.
+                        artBytes = null,
                         currentLyricsLine = if (isNewTrack) null else it.currentLyricsLine,
                     )
                 }
             }
         }
         viewModelScope.launch {
-            socket.stateUpdates.collect { state ->
+            transport.artUpdates.collect { art ->
+                // Guards against a stale push arriving after a fast double
+                // track-change — only apply it if it still matches the track
+                // currently on screen.
+                _uiState.update { if (it.artHash == art.hash) it.copy(artBytes = art.bytes) else it }
+            }
+        }
+        viewModelScope.launch {
+            transport.stateUpdates.collect { state ->
                 basePositionMs = state.positionMs
                 baseTimestampMs = state.timestampMs
                 _uiState.update { it.copy(playing = state.playing, positionMs = state.positionMs, volume = state.volume ?: it.volume) }
             }
         }
         viewModelScope.launch {
-            socket.lyricsUpdates.collect { lyrics ->
+            transport.lyricsUpdates.collect { lyrics ->
                 lyricsLines = lyrics.lines.orEmpty()
             }
         }
         viewModelScope.launch {
-            socket.spectrumUpdates.collect { spectrum ->
+            transport.spectrumUpdates.collect { spectrum ->
                 val incoming = spectrum.bands
                 _uiState.update { current ->
                     // Light smoothing between frames so the bars glide instead
@@ -127,21 +143,21 @@ class PanelViewModel(
     private fun lineAt(positionMs: Long): String? =
         lyricsLines.lastOrNull { it.timeMs <= positionMs }?.text
 
-    fun playPause() = socket.sendCommand("playPause")
-    fun next() = socket.sendCommand("next")
-    fun prev() = socket.sendCommand("prev")
-    fun volumeUp() = socket.sendCommand("volumeUp")
-    fun volumeDown() = socket.sendCommand("volumeDown")
+    fun playPause() = transport.sendCommand("playPause")
+    fun next() = transport.sendCommand("next")
+    fun prev() = transport.sendCommand("prev")
+    fun volumeUp() = transport.sendCommand("volumeUp")
+    fun volumeDown() = transport.sendCommand("volumeDown")
 
     fun seek(positionMs: Long) {
         basePositionMs = positionMs
         baseTimestampMs = System.currentTimeMillis()
         _uiState.update { it.copy(positionMs = positionMs, currentLyricsLine = lineAt(positionMs)) }
-        socket.sendCommand("seek", value = positionMs.toDouble())
+        transport.sendCommand("seek", value = positionMs.toDouble())
     }
 
     override fun onCleared() {
-        socket.disconnect()
+        transport.disconnect()
     }
 
     private companion object {

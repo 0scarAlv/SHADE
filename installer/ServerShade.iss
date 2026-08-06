@@ -1,5 +1,5 @@
 #define MyAppName "Server Shade"
-#define MyAppVersion "0.1.0"
+#define MyAppVersion "1.0.5"
 #define MyAppExeName "Shade.Agent.exe"
 
 [Setup]
