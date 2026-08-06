@@ -60,7 +60,7 @@ fun GestureNavShell(onExit: () -> Unit) {
                     onDragEnd = {
                         resolveDirection(dragOffset, swipeThresholdPx)
                             ?.let { preferences.screenFor(it) }
-                            ?.let { current = it }
+                            ?.let { screen -> if (screen == NavScreen.HOME) onExit() else current = screen }
                         dragOffset = Offset.Zero
                     },
                 )
@@ -70,6 +70,10 @@ fun GestureNavShell(onExit: () -> Unit) {
             NavScreen.PLAYER -> PanelScreen(viewModel = viewModel)
             NavScreen.STATS -> ResourceScreen(viewModel = viewModel)
             NavScreen.CLOCK -> ClockScreen()
+            // Never actually assigned to `current` — HOME is intercepted in
+            // onDragEnd above and exits the shell instead. Kept here only so
+            // this `when` stays exhaustive over NavScreen.
+            NavScreen.HOME -> Unit
         }
 
         // Same spot PanelScreen's back button used to occupy: top-right, a bit

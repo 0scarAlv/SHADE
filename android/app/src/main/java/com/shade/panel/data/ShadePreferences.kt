@@ -5,7 +5,7 @@ import androidx.core.content.edit
 
 enum class Transport { WEBSOCKET, BLUETOOTH }
 
-enum class NavScreen { PLAYER, STATS, CLOCK }
+enum class NavScreen { PLAYER, STATS, CLOCK, HOME }
 
 enum class SwipeDirection { RIGHT, LEFT, UP, DOWN }
 
@@ -41,9 +41,10 @@ class ShadePreferences(context: Context) {
         get() = getDirection(KEY_SWIPE_UP, NavScreen.CLOCK)
         set(value) = setDirection(KEY_SWIPE_UP, value)
 
-    // No default destination — reserved for a future screen/action slot.
+    // Defaults to HOME: with the phone mounted as a fixed panel, swipe-down
+    // is the natural "get me out of here" gesture back to the tile grid.
     var swipeDown: NavScreen?
-        get() = getDirection(KEY_SWIPE_DOWN, null)
+        get() = getDirection(KEY_SWIPE_DOWN, NavScreen.HOME)
         set(value) = setDirection(KEY_SWIPE_DOWN, value)
 
     fun screenFor(direction: SwipeDirection): NavScreen? = when (direction) {

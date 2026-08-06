@@ -42,9 +42,17 @@ public sealed record ResourceMessage(
     double NetUpBytesPerSec,
     bool HasBattery,
     int? BatteryPercent,
-    bool? BatteryCharging)
+    bool? BatteryCharging,
+    double CpuUsagePercent)
 {
     public string Type => "resource";
+}
+
+public sealed record ProcessEntry(string Name, int Pid, long RamBytes, double CpuPercent);
+
+public sealed record ProcessListMessage(string Metric, List<ProcessEntry> Processes)
+{
+    public string Type => "processes";
 }
 
 // App -> Agent

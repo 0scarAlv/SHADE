@@ -2,6 +2,7 @@ using Shade.Agent.Audio;
 using Shade.Agent.Protocol;
 using Shade.Agent.Smtc;
 using Shade.Agent.Streaming;
+using Shade.Agent.SystemMonitor;
 using Windows.Devices.Bluetooth.Rfcomm;
 using Windows.Networking.Sockets;
 
@@ -15,6 +16,7 @@ public sealed class RfcommServer : BackgroundService
     private readonly ClientHub _clientHub;
     private readonly SmtcSessionWatcher _smtc;
     private readonly SystemVolumeController _volumeController;
+    private readonly ResourceMonitorService _resourceMonitor;
     private readonly ILogger<RfcommServer> _logger;
     private RfcommServiceProvider? _provider;
     private StreamSocketListener? _listener;
@@ -24,11 +26,17 @@ public sealed class RfcommServer : BackgroundService
     // client gets.
     public event Func<IClientConnection, Task>? ClientConnected;
 
-    public RfcommServer(ClientHub clientHub, SmtcSessionWatcher smtc, SystemVolumeController volumeController, ILogger<RfcommServer> logger)
+    public RfcommServer(
+        ClientHub clientHub,
+        SmtcSessionWatcher smtc,
+        SystemVolumeController volumeController,
+        ResourceMonitorService resourceMonitor,
+        ILogger<RfcommServer> logger)
     {
         _clientHub = clientHub;
         _smtc = smtc;
         _volumeController = volumeController;
+        _resourceMonitor = resourceMonitor;
         _logger = logger;
     }
 
@@ -83,7 +91,7 @@ public sealed class RfcommServer : BackgroundService
 
             await _clientHub.PumpAsync(
                 connection,
-                json => CommandHandler.HandleAsync(json, _smtc, _volumeController, _logger),
+                json => CommandHandler.HandleAsync(json, _smtc, _volumeController, _resourceMonitor, _clientHub, connection, _logger),
                 stoppingToken);
         }
         catch (Exception ex)

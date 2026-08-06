@@ -23,11 +23,21 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
 import com.shade.panel.R
 import com.shade.panel.ui.theme.PanelOnBackgroundMuted
@@ -35,15 +45,42 @@ import com.shade.panel.ui.theme.PanelSurface
 
 private const val TOTAL_TILES = 6
 
+// Same threshold GestureNavShell uses for its own swipe detection — kept in
+// sync by convention rather than shared, since the two screens' gesture
+// detectors serve different destinations (this one only opens the player).
+private val SWIPE_UP_THRESHOLD = 80.dp
+
 // Dashboard for the panel: tile 1 is the real music controller, the rest are
 // placeholders reserved for whatever gets built next (clock, notifications,
 // quick actions, ...). Adaptive columns so it reflows sanely in landscape too.
 @Composable
 fun HomeScreen(onOpenPlayer: () -> Unit, onOpenConnection: () -> Unit, onOpenGestureSettings: () -> Unit) {
+    val swipeThresholdPx = with(LocalDensity.current) { SWIPE_UP_THRESHOLD.toPx() }
+    var overscroll by remember { mutableFloatStateOf(0f) }
+    // Rides on the grid's own nested-scroll dispatch instead of a competing
+    // drag detector: the grid consumes the scroll normally, and only the
+    // leftover it can't consume (i.e. already at the bottom) reaches here —
+    // that's exactly "keep swiping past the end of the list".
+    val nestedScrollConnection = remember {
+        object : NestedScrollConnection {
+            override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset {
+                if (available.y < 0f) overscroll += available.y
+                return Offset.Zero
+            }
+
+            override suspend fun onPreFling(available: Velocity): Velocity {
+                if (-overscroll > swipeThresholdPx) onOpenPlayer()
+                overscroll = 0f
+                return Velocity.Zero
+            }
+        }
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(24.dp),
+            .padding(24.dp)
+            .nestedScroll(nestedScrollConnection),
     ) {
         Text(
             text = stringResource(R.string.app_name),

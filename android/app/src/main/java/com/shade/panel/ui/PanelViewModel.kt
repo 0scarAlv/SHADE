@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.shade.panel.data.ConnectionState
 import com.shade.panel.data.LyricsLine
+import com.shade.panel.data.ProcessEntry
 import com.shade.panel.data.ResourceMessage
 import com.shade.panel.data.ShadeSocket
 import com.shade.panel.data.ShadeTransport
@@ -30,6 +31,10 @@ data class PanelUiState(
     val currentLyricsLine: String? = null,
     val spectrumBands: List<Float> = List(BAND_COUNT) { 0f },
     val resource: ResourceMessage? = null,
+    // Non-null metric means the drilldown overlay should be showing; entries
+    // stay null while the reply is in flight (drives a loading state).
+    val processDrilldownMetric: String? = null,
+    val processDrilldownEntries: List<ProcessEntry>? = null,
 )
 
 const val BAND_COUNT = 32
@@ -129,6 +134,16 @@ class PanelViewModel(
             }
         }
         viewModelScope.launch {
+            transport.processUpdates.collect { msg ->
+                // Guards against a stale reply arriving after the overlay was
+                // dismissed or reopened for the other metric — same shape as
+                // the artUpdates guard above.
+                _uiState.update {
+                    if (it.processDrilldownMetric == msg.metric) it.copy(processDrilldownEntries = msg.processes) else it
+                }
+            }
+        }
+        viewModelScope.launch {
             while (isActive) {
                 delay(INTERPOLATION_TICK_MS)
                 val current = _uiState.value
@@ -161,6 +176,15 @@ class PanelViewModel(
         baseTimestampMs = System.currentTimeMillis()
         _uiState.update { it.copy(positionMs = positionMs, currentLyricsLine = lineAt(positionMs)) }
         transport.sendCommand("seek", value = positionMs.toDouble())
+    }
+
+    fun requestProcesses(metric: String) {
+        _uiState.update { it.copy(processDrilldownMetric = metric, processDrilldownEntries = null) }
+        transport.sendCommand(if (metric == "cpu") "topProcessesByCpu" else "topProcessesByRam")
+    }
+
+    fun dismissProcessDrilldown() {
+        _uiState.update { it.copy(processDrilldownMetric = null, processDrilldownEntries = null) }
     }
 
     override fun onCleared() {

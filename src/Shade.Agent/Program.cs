@@ -96,7 +96,8 @@ resourceMonitor.SampleAvailable += sample =>
     currentResource = new ResourceMessage(
         sample.RamUsedBytes, sample.RamTotalBytes,
         sample.NetDownBytesPerSec, sample.NetUpBytesPerSec,
-        sample.HasBattery, sample.BatteryPercent, sample.BatteryCharging);
+        sample.HasBattery, sample.BatteryPercent, sample.BatteryCharging,
+        sample.CpuUsagePercent);
     _ = clientHub.BroadcastAsync(currentResource);
 };
 
@@ -184,7 +185,7 @@ app.MapGet("/", async (HttpContext context) =>
 
     await clientHub.PumpAsync(
         connection,
-        json => CommandHandler.HandleAsync(json, smtc, volumeController, logger),
+        json => CommandHandler.HandleAsync(json, smtc, volumeController, resourceMonitor, clientHub, connection, logger),
         context.RequestAborted);
 });
 

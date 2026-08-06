@@ -1,6 +1,8 @@
 using System.Text.Json;
 using Shade.Agent.Audio;
 using Shade.Agent.Smtc;
+using Shade.Agent.Streaming;
+using Shade.Agent.SystemMonitor;
 
 namespace Shade.Agent.Protocol;
 
@@ -8,7 +10,14 @@ namespace Shade.Agent.Protocol;
 // command and applies it to the SMTC session / system volume.
 public static class CommandHandler
 {
-    public static async Task HandleAsync(string json, SmtcSessionWatcher smtc, SystemVolumeController volumeController, ILogger logger)
+    public static async Task HandleAsync(
+        string json,
+        SmtcSessionWatcher smtc,
+        SystemVolumeController volumeController,
+        ResourceMonitorService resourceMonitor,
+        ClientHub clientHub,
+        IClientConnection connection,
+        ILogger logger)
     {
         IncomingCommand? command;
         try
@@ -48,9 +57,18 @@ public static class CommandHandler
                 if (command.Value is { } positionMs)
                     await smtc.TrySeekAsync((long)positionMs);
                 break;
+            case "topProcessesByRam":
+                await clientHub.SendToAsync(connection, ToProcessListMessage("ram", resourceMonitor.TopProcessesByRam));
+                break;
+            case "topProcessesByCpu":
+                await clientHub.SendToAsync(connection, ToProcessListMessage("cpu", resourceMonitor.TopProcessesByCpu));
+                break;
             default:
                 logger.LogInformation("Acción '{Action}' desconocida.", command.Action);
                 break;
         }
     }
+
+    private static ProcessListMessage ToProcessListMessage(string metric, IReadOnlyList<ProcessSample> samples) =>
+        new(metric, samples.Select(s => new ProcessEntry(s.Name, s.Pid, s.RamBytes, s.CpuPercent)).ToList());
 }

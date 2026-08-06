@@ -105,6 +105,7 @@ private fun DirectionSection(label: String, selected: NavScreen?, onSelect: (Nav
             ScreenChip(stringResource(R.string.nav_screen_player), selected == NavScreen.PLAYER) { onSelect(NavScreen.PLAYER) }
             ScreenChip(stringResource(R.string.nav_screen_stats), selected == NavScreen.STATS) { onSelect(NavScreen.STATS) }
             ScreenChip(stringResource(R.string.nav_screen_clock), selected == NavScreen.CLOCK) { onSelect(NavScreen.CLOCK) }
+            ScreenChip(stringResource(R.string.nav_screen_home), selected == NavScreen.HOME) { onSelect(NavScreen.HOME) }
             ScreenChip(stringResource(R.string.nav_screen_none), selected == null) { onSelect(null) }
         }
     }

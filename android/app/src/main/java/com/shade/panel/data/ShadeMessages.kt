@@ -47,6 +47,21 @@ data class ResourceMessage(
     val hasBattery: Boolean,
     val batteryPercent: Int? = null,
     val batteryCharging: Boolean? = null,
+    val cpuUsagePercent: Double = 0.0,
+)
+
+@Serializable
+data class ProcessEntry(
+    val name: String,
+    val pid: Int,
+    val ramBytes: Long,
+    val cpuPercent: Double,
+)
+
+@Serializable
+data class ProcessListMessage(
+    val metric: String,
+    val processes: List<ProcessEntry>,
 )
 
 @Serializable

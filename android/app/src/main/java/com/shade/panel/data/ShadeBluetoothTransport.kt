@@ -68,6 +68,9 @@ class ShadeBluetoothTransport(
     private val _resourceUpdates = MutableSharedFlow<ResourceMessage>(extraBufferCapacity = 1)
     override val resourceUpdates: SharedFlow<ResourceMessage> = _resourceUpdates.asSharedFlow()
 
+    private val _processUpdates = MutableSharedFlow<ProcessListMessage>(extraBufferCapacity = 1)
+    override val processUpdates: SharedFlow<ProcessListMessage> = _processUpdates.asSharedFlow()
+
     private val _artUpdates = MutableSharedFlow<ArtPayload>(extraBufferCapacity = 1)
     override val artUpdates: SharedFlow<ArtPayload> = _artUpdates.asSharedFlow()
 
@@ -174,6 +177,8 @@ class ShadeBluetoothTransport(
                 .onSuccess { _spectrumUpdates.tryEmit(it) }
             "resource" -> runCatching { json.decodeFromJsonElement(ResourceMessage.serializer(), element) }
                 .onSuccess { _resourceUpdates.tryEmit(it) }
+            "processes" -> runCatching { json.decodeFromJsonElement(ProcessListMessage.serializer(), element) }
+                .onSuccess { _processUpdates.tryEmit(it) }
         }
     }
 
