@@ -70,9 +70,13 @@ public sealed class RfcommServer : BackgroundService
 
     private async void OnConnectionReceived(StreamSocketListenerConnectionReceivedEventArgs args, CancellationToken stoppingToken)
     {
-        IClientConnection connection = new BluetoothClientConnection(args.Socket, _logger);
         try
         {
+            // args.Socket can throw (e.g. COMException 0x800703E3 if the
+            // connection was aborted mid-handshake) — this whole method is
+            // `async void`, so anything thrown outside this try crashes the
+            // entire host process instead of just failing this connection.
+            IClientConnection connection = new BluetoothClientConnection(args.Socket, _logger);
             _clientHub.Register(connection);
             if (ClientConnected is { } handler)
                 await handler(connection);

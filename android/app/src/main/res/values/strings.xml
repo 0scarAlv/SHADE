@@ -24,4 +24,19 @@
     <string name="connection_paired_devices">Dispositivos emparejados</string>
     <string name="connection_selected_badge">PC seleccionada</string>
     <string name="no_lyrics_available">Sin letra disponible</string>
+    <string name="resource_waiting">Esperando datos de la PC…</string>
+    <string name="resource_ram">Memoria RAM</string>
+    <string name="resource_network_down">Descarga</string>
+    <string name="resource_network_up">Carga</string>
+    <string name="resource_battery">Batería</string>
+    <string name="tile_gestures">Gestos</string>
+    <string name="gesture_settings_title">Gestos</string>
+    <string name="gesture_direction_right">Deslizar a la derecha</string>
+    <string name="gesture_direction_left">Deslizar a la izquierda</string>
+    <string name="gesture_direction_up">Deslizar hacia arriba</string>
+    <string name="gesture_direction_down">Deslizar hacia abajo</string>
+    <string name="nav_screen_player">Reproductor</string>
+    <string name="nav_screen_stats">Estadísticas</string>
+    <string name="nav_screen_clock">Reloj</string>
+    <string name="nav_screen_none">Ninguno</string>
 </resources>

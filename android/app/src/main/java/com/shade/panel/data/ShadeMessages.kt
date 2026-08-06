@@ -39,6 +39,17 @@ data class SpectrumMessage(
 )
 
 @Serializable
+data class ResourceMessage(
+    val ramUsedBytes: Long,
+    val ramTotalBytes: Long,
+    val netDownBytesPerSec: Double,
+    val netUpBytesPerSec: Double,
+    val hasBattery: Boolean,
+    val batteryPercent: Int? = null,
+    val batteryCharging: Boolean? = null,
+)
+
+@Serializable
 data class CommandMessage(
     val type: String = "cmd",
     val action: String,

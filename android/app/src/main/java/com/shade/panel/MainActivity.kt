@@ -12,11 +12,12 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import com.shade.panel.ui.BluetoothSettingsScreen
+import com.shade.panel.ui.GestureNavShell
+import com.shade.panel.ui.GestureSettingsScreen
 import com.shade.panel.ui.HomeScreen
-import com.shade.panel.ui.PanelScreen
 import com.shade.panel.ui.theme.ShadeTheme
 
-private enum class Screen { HOME, PLAYER, CONNECTION }
+private enum class Screen { HOME, PANEL, CONNECTION, GESTURE_SETTINGS }
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -33,11 +34,13 @@ class MainActivity : ComponentActivity() {
                     // something.
                     var screen by rememberSaveable { mutableStateOf(Screen.HOME) }
                     when (screen) {
-                        Screen.PLAYER -> PanelScreen(onBack = { screen = Screen.HOME })
+                        Screen.PANEL -> GestureNavShell(onExit = { screen = Screen.HOME })
                         Screen.CONNECTION -> BluetoothSettingsScreen(onBack = { screen = Screen.HOME })
+                        Screen.GESTURE_SETTINGS -> GestureSettingsScreen(onBack = { screen = Screen.HOME })
                         Screen.HOME -> HomeScreen(
-                            onOpenPlayer = { screen = Screen.PLAYER },
+                            onOpenPlayer = { screen = Screen.PANEL },
                             onOpenConnection = { screen = Screen.CONNECTION },
+                            onOpenGestureSettings = { screen = Screen.GESTURE_SETTINGS },
                         )
                     }
                 }

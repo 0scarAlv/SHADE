@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.shade.panel.data.ConnectionState
 import com.shade.panel.data.LyricsLine
+import com.shade.panel.data.ResourceMessage
 import com.shade.panel.data.ShadeSocket
 import com.shade.panel.data.ShadeTransport
 import kotlinx.coroutines.delay
@@ -28,6 +29,7 @@ data class PanelUiState(
     val volume: Double? = null,
     val currentLyricsLine: String? = null,
     val spectrumBands: List<Float> = List(BAND_COUNT) { 0f },
+    val resource: ResourceMessage? = null,
 )
 
 const val BAND_COUNT = 32
@@ -119,6 +121,11 @@ class PanelViewModel(
                     }
                     current.copy(spectrumBands = smoothed)
                 }
+            }
+        }
+        viewModelScope.launch {
+            transport.resourceUpdates.collect { resource ->
+                _uiState.update { it.copy(resource = resource) }
             }
         }
         viewModelScope.launch {
