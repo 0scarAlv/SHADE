@@ -28,7 +28,8 @@ data class PanelUiState(
     val positionMs: Long = 0,
     val durationMs: Long = 0,
     val volume: Double? = null,
-    val currentLyricsLine: String? = null,
+    val lyricsLines: List<LyricsLine> = emptyList(),
+    val currentLyricsIndex: Int = -1,
     val spectrumBands: List<Float> = List(BAND_COUNT) { 0f },
     val resource: ResourceMessage? = null,
     // Non-null metric means the drilldown overlay should be showing; entries
@@ -88,7 +89,8 @@ class PanelViewModel(
                         // arrives (see artUpdates below) — WebSocket doesn't push
                         // art at all, it just uses artUrl above.
                         artBytes = null,
-                        currentLyricsLine = if (isNewTrack) null else it.currentLyricsLine,
+                        lyricsLines = if (isNewTrack) emptyList() else it.lyricsLines,
+                        currentLyricsIndex = if (isNewTrack) -1 else it.currentLyricsIndex,
                     )
                 }
             }
@@ -111,6 +113,8 @@ class PanelViewModel(
         viewModelScope.launch {
             transport.lyricsUpdates.collect { lyrics ->
                 lyricsLines = lyrics.lines.orEmpty()
+                val index = indexAt(_uiState.value.positionMs)
+                _uiState.update { it.copy(lyricsLines = lyricsLines, currentLyricsIndex = index) }
             }
         }
         viewModelScope.launch {
@@ -157,13 +161,13 @@ class PanelViewModel(
                 } else {
                     current.positionMs
                 }
-                _uiState.update { it.copy(positionMs = positionMs, currentLyricsLine = lineAt(positionMs)) }
+                _uiState.update { it.copy(positionMs = positionMs, currentLyricsIndex = indexAt(positionMs)) }
             }
         }
     }
 
-    private fun lineAt(positionMs: Long): String? =
-        lyricsLines.lastOrNull { it.timeMs <= positionMs }?.text
+    private fun indexAt(positionMs: Long): Int =
+        lyricsLines.indexOfLast { it.timeMs <= positionMs }
 
     fun playPause() = transport.sendCommand("playPause")
     fun next() = transport.sendCommand("next")
@@ -174,7 +178,7 @@ class PanelViewModel(
     fun seek(positionMs: Long) {
         basePositionMs = positionMs
         baseTimestampMs = System.currentTimeMillis()
-        _uiState.update { it.copy(positionMs = positionMs, currentLyricsLine = lineAt(positionMs)) }
+        _uiState.update { it.copy(positionMs = positionMs, currentLyricsIndex = indexAt(positionMs)) }
         transport.sendCommand("seek", value = positionMs.toDouble())
     }
 

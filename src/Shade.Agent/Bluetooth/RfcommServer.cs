@@ -5,6 +5,7 @@ using Shade.Agent.Streaming;
 using Shade.Agent.SystemMonitor;
 using Windows.Devices.Bluetooth.Rfcomm;
 using Windows.Networking.Sockets;
+using Windows.Storage.Streams;
 
 namespace Shade.Agent.Bluetooth;
 
@@ -13,6 +14,12 @@ namespace Shade.Agent.Bluetooth;
 // alive" hosted services, running side by side.
 public sealed class RfcommServer : BackgroundService
 {
+    // SDP attribute id 0x0100 = ServiceName; 0x25 = "UTF-8 text string, length
+    // in the next byte" per the Bluetooth SDP attribute type encoding.
+    private const uint SdpServiceNameAttributeId = 0x100;
+    private const byte SdpServiceNameAttributeType = 0x25;
+    private const string SdpServiceName = "Shade";
+
     private readonly ClientHub _clientHub;
     private readonly SmtcSessionWatcher _smtc;
     private readonly SystemVolumeController _volumeController;
@@ -51,6 +58,22 @@ public sealed class RfcommServer : BackgroundService
             await _listener.BindServiceNameAsync(
                 _provider.ServiceId.AsString(),
                 SocketProtectionLevel.BluetoothEncryptionAllowNullAuthentication);
+
+            // Windows' auto-generated SDP record (ServiceClassId + protocol
+            // descriptor list) is enough for another Windows/UWP client, but
+            // Android's SDP client does a direct UUID lookup that comes back
+            // SDP_SUCCESS-but-scn:0 (record found the transport, but nothing
+            // usable in it) without an explicit ServiceName attribute (SDP
+            // attribute id 0x0100) — confirmed via adb logcat's bt_btif_sock_rfcomm
+            // trace during a real connection attempt. This mirrors Microsoft's
+            // own RfcommChat sample, which sets this same attribute for the
+            // same cross-platform-interop reason.
+            var sdpWriter = new DataWriter();
+            sdpWriter.WriteByte(SdpServiceNameAttributeType);
+            var serviceNameBytes = System.Text.Encoding.UTF8.GetBytes(SdpServiceName);
+            sdpWriter.WriteByte((byte)serviceNameBytes.Length);
+            sdpWriter.WriteBytes(serviceNameBytes);
+            _provider.SdpRawAttributes.Add(SdpServiceNameAttributeId, sdpWriter.DetachBuffer());
 
             _provider.StartAdvertising(_listener, true);
             _logger.LogInformation("Servicio RFCOMM anunciándose ({Uuid}).", ShadeRfcommService.Uuid);

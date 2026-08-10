@@ -1,6 +1,7 @@
 package com.shade.panel.ui
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -10,10 +11,12 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -23,6 +26,9 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -41,22 +47,29 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.boundsInParent
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontStyle
@@ -69,8 +82,11 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import coil3.compose.AsyncImage
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.first
 import com.shade.panel.R
 import com.shade.panel.data.ConnectionState
+import com.shade.panel.data.LyricsLine
 import com.shade.panel.data.ShadeBluetoothTransport
 import com.shade.panel.data.ShadePreferences
 import com.shade.panel.data.ShadeSocket
@@ -125,7 +141,12 @@ fun PanelScreen(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(32.dp),
             ) {
-                AlbumArt(uiState.artBytes ?: uiState.artUrl, size = availableHeight - 48.dp, lyricsLine = uiState.currentLyricsLine)
+                AlbumArt(
+                    uiState.artBytes ?: uiState.artUrl,
+                    size = availableHeight - 48.dp,
+                    lyricsLines = uiState.lyricsLines,
+                    currentLyricsIndex = uiState.currentLyricsIndex,
+                )
                 Column(
                     modifier = Modifier
                         .fillMaxHeight()
@@ -158,7 +179,12 @@ fun PanelScreen(
             ) {
                 ConnectionBadge(uiState.connection)
                 Spacer(Modifier.height(20.dp))
-                AlbumArt(uiState.artBytes ?: uiState.artUrl, size = 240.dp, lyricsLine = uiState.currentLyricsLine)
+                AlbumArt(
+                    uiState.artBytes ?: uiState.artUrl,
+                    size = 240.dp,
+                    lyricsLines = uiState.lyricsLines,
+                    currentLyricsIndex = uiState.currentLyricsIndex,
+                )
                 Spacer(Modifier.height(20.dp))
                 TrackInfo(uiState, textAlign = TextAlign.Center)
                 Spacer(Modifier.height(16.dp))
@@ -175,12 +201,12 @@ fun PanelScreen(
     }
 }
 
-// Double-tap toggles a blurred cover with the current lyric line over it —
+// Double-tap toggles a blurred cover with a scrolling lyrics list over it —
 // lets people who want lyrics have them without the info block below
 // growing/shrinking every time a line changes (see TrackInfo), and people
 // who don't want them just never double-tap.
 @Composable
-private fun AlbumArt(art: Any?, size: Dp, lyricsLine: String?) {
+private fun AlbumArt(art: Any?, size: Dp, lyricsLines: List<LyricsLine>, currentLyricsIndex: Int) {
     var lyricsVisible by remember { mutableStateOf(false) }
 
     Box(
@@ -211,13 +237,104 @@ private fun AlbumArt(art: Any?, size: Dp, lyricsLine: String?) {
                     .background(Color.Black.copy(alpha = 0.35f)),
                 contentAlignment = Alignment.Center,
             ) {
+                LyricsList(lyricsLines, currentLyricsIndex, modifier = Modifier.fillMaxSize())
+            }
+        }
+    }
+}
+
+// Karaoke-style scroller: the active line sits centered and full-size, the
+// rest fade/shrink with distance from it, and the list glides to the new
+// active line instead of just swapping text — reads as "following along"
+// instead of a delayed jump-cut every time the line changes.
+@Composable
+private fun LyricsList(lines: List<LyricsLine>, currentIndex: Int, modifier: Modifier = Modifier) {
+    if (lines.isEmpty()) {
+        Box(modifier = modifier, contentAlignment = Alignment.Center) {
+            Text(
+                text = stringResource(R.string.no_lyrics_available),
+                style = MaterialTheme.typography.titleMedium,
+                fontStyle = FontStyle.Italic,
+                color = Color.White,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.padding(20.dp),
+            )
+        }
+        return
+    }
+
+    val listState = rememberLazyListState()
+    val safeIndex = currentIndex.coerceIn(0, lines.lastIndex)
+
+    BoxWithConstraints(modifier = modifier) {
+        val containerHeightPx = with(LocalDensity.current) { maxHeight.toPx() }
+        // The ground truth for centering: the active line's own actual
+        // rendered vertical center, in the LazyColumn's coordinate space,
+        // reported by onGloballyPositioned. LazyListItemInfo.offset looked
+        // like it should give the same number but didn't match what was
+        // actually on screen (verified by comparing against a debug
+        // reference line drawn at the true container center) — measuring
+        // the real composed position sidesteps whatever assumption was
+        // wrong there.
+        var activeLineCenterY by remember(safeIndex) { mutableStateOf<Float?>(null) }
+
+        LaunchedEffect(safeIndex) {
+            listState.animateScrollToItem(index = safeIndex, scrollOffset = 0)
+            // The jump above is fully settled at this point, but
+            // activeLineCenterY may still hold a stale reading from
+            // mid-animation (onGloballyPositioned fires on every layout
+            // pass while scrolling, not just the final one). Clear it and
+            // wait for the next report, which is guaranteed to reflect the
+            // post-settle position.
+            activeLineCenterY = null
+            val centerY = snapshotFlow { activeLineCenterY }.filterNotNull().first()
+            val delta = centerY - containerHeightPx / 2
+            if (kotlin.math.abs(delta) > 1f) listState.animateScrollBy(delta, tween(220))
+        }
+
+        LazyColumn(
+            state = listState,
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(vertical = maxHeight / 2),
+        ) {
+            itemsIndexed(lines) { index, line ->
+                val distance = kotlin.math.abs(index - safeIndex)
+                val isCurrent = index == safeIndex
+                val alpha by animateFloatAsState(
+                    targetValue = when {
+                        isCurrent -> 1f
+                        distance == 1 -> 0.55f
+                        distance == 2 -> 0.3f
+                        else -> 0.15f
+                    },
+                    animationSpec = tween(220),
+                    label = "lyricsLineAlpha",
+                )
+                val scale by animateFloatAsState(
+                    targetValue = if (isCurrent) 1f else 0.85f,
+                    animationSpec = tween(220),
+                    label = "lyricsLineScale",
+                )
                 Text(
-                    text = lyricsLine?.takeIf { it.isNotBlank() } ?: stringResource(R.string.no_lyrics_available),
-                    style = MaterialTheme.typography.titleMedium,
-                    fontStyle = FontStyle.Italic,
+                    text = line.text,
+                    style = if (isCurrent) MaterialTheme.typography.titleMedium else MaterialTheme.typography.bodyMedium,
+                    fontStyle = if (isCurrent) FontStyle.Normal else FontStyle.Italic,
                     color = Color.White,
                     textAlign = TextAlign.Center,
-                    modifier = Modifier.padding(20.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .then(
+                            if (isCurrent) {
+                                Modifier.onGloballyPositioned { coords ->
+                                    activeLineCenterY = coords.boundsInParent().center.y
+                                }
+                            } else {
+                                Modifier
+                            },
+                        )
+                        .alpha(alpha)
+                        .scale(scale)
+                        .padding(horizontal = 20.dp, vertical = 8.dp),
                 )
             }
         }

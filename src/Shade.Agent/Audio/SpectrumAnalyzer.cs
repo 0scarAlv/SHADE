@@ -16,7 +16,27 @@ public sealed class SpectrumAnalyzer : IDisposable
 
     private readonly float[] _sampleBuffer = new float[FftLength];
     private readonly Complex[] _fftBuffer = new Complex[FftLength];
+    private readonly float[] _bandGain = BuildBandGain();
     private int _sampleCount;
+
+    // Real music has way more energy in bass than treble (roughly a -6dB/octave
+    // tilt), so raw FFT magnitude alone leaves the high bands almost always
+    // under the log curve's visible threshold — the bars only ever seem to
+    // move on the left. This boosts higher bands progressively (up to +18dB at
+    // the top band) so treble that's actually present gets to the same visual
+    // range as bass, without inventing movement out of silence (boosting near-
+    // zero magnitude is still near zero).
+    private static float[] BuildBandGain()
+    {
+        const float maxBoostDb = 18f;
+        var gains = new float[BandCount];
+        for (var band = 0; band < BandCount; band++)
+        {
+            var db = band / (float)(BandCount - 1) * maxBoostDb;
+            gains[band] = MathF.Pow(10f, db / 20f);
+        }
+        return gains;
+    }
 
     private WasapiLoopbackCapture? _capture;
 
@@ -93,10 +113,11 @@ public sealed class SpectrumAnalyzer : IDisposable
             }
 
             var magnitude = count > 0 ? sum / count : 0f;
+            var boosted = magnitude * _bandGain[band];
             // The raw FFT magnitudes for typical music are tiny (~0.01-0.1),
             // so this needs a fairly aggressive gain curve to read as an
             // actual visible equalizer instead of a flat line.
-            bands[band] = Math.Clamp(MathF.Log10(1 + magnitude * 200) / 1.4f, 0f, 1f);
+            bands[band] = Math.Clamp(MathF.Log10(1 + boosted * 200) / 1.4f, 0f, 1f);
         }
 
         SpectrumAvailable?.Invoke(bands);
