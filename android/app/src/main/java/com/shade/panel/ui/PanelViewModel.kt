@@ -105,9 +105,34 @@ class PanelViewModel(
         }
         viewModelScope.launch {
             transport.stateUpdates.collect { state ->
-                basePositionMs = state.positionMs
-                baseTimestampMs = state.timestampMs
-                _uiState.update { it.copy(playing = state.playing, positionMs = state.positionMs, volume = state.volume ?: it.volume) }
+                // SMTC's TimelinePropertiesChanged fires roughly every second
+                // even without a real change, and the position it reports can
+                // lag the true elapsed time by up to ~1s depending on when the
+                // source app last ticked its own timeline. Re-anchoring the
+                // local interpolation on every one of these made the displayed
+                // second visibly hop backward and forward (21, 22, 21, 22...).
+                // Only re-anchor on an actual discontinuity — play/pause
+                // toggling or a drift bigger than that jitter margin (seek,
+                // track change) — otherwise let interpolation keep counting
+                // up uninterrupted.
+                val wasPlaying = _uiState.value.playing
+                val predictedMs = if (wasPlaying && baseTimestampMs > 0) {
+                    basePositionMs + (System.currentTimeMillis() - baseTimestampMs)
+                } else {
+                    basePositionMs
+                }
+                val driftMs = state.positionMs - predictedMs
+                if (!state.playing || state.playing != wasPlaying || kotlin.math.abs(driftMs) > POSITION_DRIFT_TOLERANCE_MS) {
+                    basePositionMs = state.positionMs
+                    baseTimestampMs = state.timestampMs
+                }
+                _uiState.update {
+                    it.copy(
+                        playing = state.playing,
+                        positionMs = if (!state.playing) state.positionMs else it.positionMs,
+                        volume = state.volume ?: it.volume,
+                    )
+                }
             }
         }
         viewModelScope.launch {
@@ -198,5 +223,6 @@ class PanelViewModel(
     private companion object {
         const val ART_BASE_URL = "http://127.0.0.1:8080/art"
         const val INTERPOLATION_TICK_MS = 250L
+        const val POSITION_DRIFT_TOLERANCE_MS = 900L
     }
 }

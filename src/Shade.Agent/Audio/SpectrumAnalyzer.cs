@@ -19,6 +19,15 @@ public sealed class SpectrumAnalyzer : IDisposable
     private readonly float[] _bandGain = BuildBandGain();
     private int _sampleCount;
 
+    // Start()/Stop() are called from SMTC's WinRT callbacks, which fire on
+    // their own COM threads — with two sessions active (e.g. a browser tab
+    // and a music app both playing) it's normal for two of those threads to
+    // call Start() close enough together to both pass the "_capture is null"
+    // check before either assigns it, which without this lock let a second
+    // WasapiLoopbackCapture.StartRecording() collide with the first and throw
+    // "Previous recording still in progress".
+    private readonly object _captureLock = new();
+
     // Real music has way more energy in bass than treble (roughly a -6dB/octave
     // tilt), so raw FFT magnitude alone leaves the high bands almost always
     // under the log curve's visible threshold — the bars only ever seem to
@@ -44,22 +53,41 @@ public sealed class SpectrumAnalyzer : IDisposable
 
     public void Start()
     {
-        if (_capture is not null) return;
+        lock (_captureLock)
+        {
+            if (_capture is not null) return;
 
-        _capture = new WasapiLoopbackCapture();
-        _capture.DataAvailable += OnDataAvailable;
-        _capture.StartRecording();
+            var capture = new WasapiLoopbackCapture();
+            capture.DataAvailable += OnDataAvailable;
+            try
+            {
+                capture.StartRecording();
+            }
+            catch (InvalidOperationException)
+            {
+                // Lost the race to a concurrent Start() call from another SMTC
+                // callback thread; that other capture is already running.
+                capture.DataAvailable -= OnDataAvailable;
+                capture.Dispose();
+                return;
+            }
+
+            _capture = capture;
+        }
     }
 
     public void Stop()
     {
-        if (_capture is null) return;
+        lock (_captureLock)
+        {
+            if (_capture is null) return;
 
-        _capture.DataAvailable -= OnDataAvailable;
-        _capture.StopRecording();
-        _capture.Dispose();
-        _capture = null;
-        _sampleCount = 0;
+            _capture.DataAvailable -= OnDataAvailable;
+            _capture.StopRecording();
+            _capture.Dispose();
+            _capture = null;
+            _sampleCount = 0;
+        }
     }
 
     private void OnDataAvailable(object? sender, WaveInEventArgs e)

@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices.WindowsRuntime;
 using System.Security.Cryptography;
+using System.Linq;
 using Windows.Media.Control;
 using Windows.Storage.Streams;
 
@@ -16,6 +17,12 @@ public sealed class SmtcSessionWatcher : IAsyncDisposable
     private readonly ILogger<SmtcSessionWatcher> _logger;
     private GlobalSystemMediaTransportControlsSessionManager? _manager;
     private GlobalSystemMediaTransportControlsSession? _session;
+
+    // Lightweight PlaybackInfoChanged subscription kept on every known session
+    // (not just the attached one), purely to notice when a background session
+    // starts/stops playing — Windows only raises SessionsChanged when sessions
+    // are added/removed, not when an existing one's playback state flips.
+    private readonly List<GlobalSystemMediaTransportControlsSession> _watchedSessions = new();
 
     public event Action<TrackInfo>? TrackChanged;
     public event Action<PlaybackState>? StateChanged;
@@ -34,19 +41,106 @@ public sealed class SmtcSessionWatcher : IAsyncDisposable
     {
         _manager = await GlobalSystemMediaTransportControlsSessionManager.RequestAsync();
         _manager.CurrentSessionChanged += OnCurrentSessionChanged;
-        AttachToCurrentSession();
+        _manager.SessionsChanged += OnSessionsChanged;
+        RefreshWatchedSessions();
+        AttachToBestSession();
     }
 
     private void OnCurrentSessionChanged(
         GlobalSystemMediaTransportControlsSessionManager sender,
         CurrentSessionChangedEventArgs args)
-        => AttachToCurrentSession();
+        => AttachToBestSession();
 
-    private void AttachToCurrentSession()
+    private void OnSessionsChanged(
+        GlobalSystemMediaTransportControlsSessionManager sender,
+        SessionsChangedEventArgs args)
     {
+        RefreshWatchedSessions();
+        AttachToBestSession();
+    }
+
+    private void OnAnySessionPlaybackInfoChanged(
+        GlobalSystemMediaTransportControlsSession sender,
+        PlaybackInfoChangedEventArgs args)
+        => AttachToBestSession();
+
+    private void RefreshWatchedSessions()
+    {
+        foreach (var watched in _watchedSessions)
+            watched.PlaybackInfoChanged -= OnAnySessionPlaybackInfoChanged;
+        _watchedSessions.Clear();
+
+        if (_manager is null) return;
+
+        foreach (var session in _manager.GetSessions())
+        {
+            session.PlaybackInfoChanged += OnAnySessionPlaybackInfoChanged;
+            _watchedSessions.Add(session);
+        }
+    }
+
+    // A browser tab autoplaying a video counts as a Playing SMTC session just
+    // like a dedicated music app does, so when both are playing at once we'd
+    // otherwise pick whichever GetSessions() happens to list first. Bias away
+    // from browsers in that tie so the actual music app wins.
+    private static readonly string[] BrowserAppIdHints =
+        { "brave", "chrome", "msedge", "firefox", "opera" };
+
+    // Windows' own "current session" is whichever app the user last
+    // interacted with (media keys, volume mixer flyout), which can keep
+    // pointing at a paused/silent session while a different app is actually
+    // playing music. Prefer any session that's actually Playing, favoring
+    // non-browser apps when several are; only fall back to Windows' pick
+    // when nothing is playing at all.
+    private GlobalSystemMediaTransportControlsSession? SelectBestSession()
+    {
+        if (_manager is null) return null;
+
+        // Sticky: keep the session we're already attached to as long as it's
+        // still playing, instead of jumping to some other session that also
+        // started playing (e.g. a background tab autoplaying next to the
+        // music app the user is actually listening to).
+        if (_session is not null && IsPlaying(_session)) return _session;
+
+        var current = _manager.GetCurrentSession();
+        var playingSessions = _manager.GetSessions().Where(IsPlaying).ToList();
+
+        var nonBrowser = playingSessions.FirstOrDefault(s => !LooksLikeBrowser(s));
+        if (nonBrowser is not null) return nonBrowser;
+
+        if (current is not null && IsPlaying(current)) return current;
+        return playingSessions.FirstOrDefault() ?? current;
+    }
+
+    private static bool LooksLikeBrowser(GlobalSystemMediaTransportControlsSession session)
+    {
+        var appId = session.SourceAppUserModelId ?? string.Empty;
+        return BrowserAppIdHints.Any(hint => appId.Contains(hint, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static bool IsPlaying(GlobalSystemMediaTransportControlsSession session)
+    {
+        try
+        {
+            return session.GetPlaybackInfo().PlaybackStatus
+                == GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing;
+        }
+        catch
+        {
+            // A session that just closed can throw here; treat as not playing.
+            return false;
+        }
+    }
+
+    private void AttachToBestSession()
+    {
+        var best = SelectBestSession();
+        if (best?.SourceAppUserModelId == _session?.SourceAppUserModelId && best is not null)
+            return;
+
         DetachFromCurrentSession();
 
-        _session = _manager?.GetCurrentSession();
+        _session = best;
         if (_session is null)
         {
             _logger.LogInformation("No hay ninguna sesión de medios activa.");
@@ -197,8 +291,15 @@ public sealed class SmtcSessionWatcher : IAsyncDisposable
     public ValueTask DisposeAsync()
     {
         DetachFromCurrentSession();
+        foreach (var watched in _watchedSessions)
+            watched.PlaybackInfoChanged -= OnAnySessionPlaybackInfoChanged;
+        _watchedSessions.Clear();
+
         if (_manager is not null)
+        {
             _manager.CurrentSessionChanged -= OnCurrentSessionChanged;
+            _manager.SessionsChanged -= OnSessionsChanged;
+        }
         return ValueTask.CompletedTask;
     }
 }
