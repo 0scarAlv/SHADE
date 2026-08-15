@@ -32,6 +32,8 @@
     <string name="resource_battery">Batería</string>
     <string name="resource_top_ram">Mayor uso de RAM</string>
     <string name="resource_top_cpu">Mayor uso de CPU</string>
+    <string name="resource_disk_read">Lectura de disco</string>
+    <string name="resource_disk_write">Escritura de disco</string>
     <string name="tile_gestures">Gestos</string>
     <string name="gesture_settings_title">Gestos</string>
     <string name="gesture_direction_right">Deslizar a la derecha</string>

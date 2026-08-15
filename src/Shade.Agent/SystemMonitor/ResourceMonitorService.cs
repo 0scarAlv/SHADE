@@ -12,7 +12,9 @@ public readonly record struct ResourceSample(
     bool HasBattery,
     int? BatteryPercent,
     bool? BatteryCharging,
-    double CpuUsagePercent);
+    double CpuUsagePercent,
+    double DiskReadBytesPerSec,
+    double DiskWriteBytesPerSec);
 
 public readonly record struct ProcessSample(string Name, int Pid, long RamBytes, double CpuPercent);
 
@@ -33,6 +35,16 @@ public sealed class ResourceMonitorService : BackgroundService
     private bool _hasCpuBaseline;
     private Dictionary<int, TimeSpan> _lastProcessCpuTimes = new();
 
+    // "_Total" instance sums every physical disk, mirroring how
+    // SampleNetworkRate sums every NIC. Built lazily (not in the
+    // constructor) so a machine where the "PhysicalDisk" perf counter
+    // category is missing/corrupt (a known occasional Windows state — the
+    // category needs `lodctr /r` to rebuild) doesn't crash the whole
+    // service on startup; disk numbers just stay at 0 instead.
+    private PerformanceCounter? _diskReadCounter;
+    private PerformanceCounter? _diskWriteCounter;
+    private bool _diskCountersFailed;
+
     public event Action<ResourceSample>? SampleAvailable;
 
     // Reference-swapped wholesale each tick (see SampleProcesses) — reads
@@ -50,14 +62,47 @@ public sealed class ResourceMonitorService : BackgroundService
         }
     }
 
+    public override void Dispose()
+    {
+        _diskReadCounter?.Dispose();
+        _diskWriteCounter?.Dispose();
+        base.Dispose();
+    }
+
     private ResourceSample Sample()
     {
         var (ramUsed, ramTotal) = SampleRam();
         var (down, up) = SampleNetworkRate();
         var (hasBattery, percent, charging) = SampleBattery();
         var cpu = SampleCpu();
+        var (diskRead, diskWrite) = SampleDiskRate();
         SampleProcesses();
-        return new ResourceSample(ramUsed, ramTotal, down, up, hasBattery, percent, charging, cpu);
+        return new ResourceSample(ramUsed, ramTotal, down, up, hasBattery, percent, charging, cpu, diskRead, diskWrite);
+    }
+
+    private (double Read, double Write) SampleDiskRate()
+    {
+        if (_diskCountersFailed) return (0, 0);
+
+        try
+        {
+            _diskReadCounter ??= new PerformanceCounter("PhysicalDisk", "Disk Read Bytes/sec", "_Total");
+            _diskWriteCounter ??= new PerformanceCounter("PhysicalDisk", "Disk Write Bytes/sec", "_Total");
+
+            // Like SampleCpu, a rate counter's first NextValue() call only
+            // establishes its baseline and returns 0 — normal, corrects
+            // itself on the next tick.
+            return (_diskReadCounter.NextValue(), _diskWriteCounter.NextValue());
+        }
+        catch
+        {
+            _diskCountersFailed = true;
+            _diskReadCounter?.Dispose();
+            _diskWriteCounter?.Dispose();
+            _diskReadCounter = null;
+            _diskWriteCounter = null;
+            return (0, 0);
+        }
     }
 
     private static (long Used, long Total) SampleRam()

@@ -97,7 +97,8 @@ resourceMonitor.SampleAvailable += sample =>
         sample.RamUsedBytes, sample.RamTotalBytes,
         sample.NetDownBytesPerSec, sample.NetUpBytesPerSec,
         sample.HasBattery, sample.BatteryPercent, sample.BatteryCharging,
-        sample.CpuUsagePercent);
+        sample.CpuUsagePercent,
+        sample.DiskReadBytesPerSec, sample.DiskWriteBytesPerSec);
     _ = clientHub.BroadcastAsync(currentResource);
 };
 

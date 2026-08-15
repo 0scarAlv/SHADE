@@ -48,6 +48,8 @@ data class ResourceMessage(
     val batteryPercent: Int? = null,
     val batteryCharging: Boolean? = null,
     val cpuUsagePercent: Double = 0.0,
+    val diskReadBytesPerSec: Double = 0.0,
+    val diskWriteBytesPerSec: Double = 0.0,
 )
 
 @Serializable

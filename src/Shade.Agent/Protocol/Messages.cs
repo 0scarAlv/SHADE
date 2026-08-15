@@ -43,7 +43,9 @@ public sealed record ResourceMessage(
     bool HasBattery,
     int? BatteryPercent,
     bool? BatteryCharging,
-    double CpuUsagePercent)
+    double CpuUsagePercent,
+    double DiskReadBytesPerSec,
+    double DiskWriteBytesPerSec)
 {
     public string Type => "resource";
 }
