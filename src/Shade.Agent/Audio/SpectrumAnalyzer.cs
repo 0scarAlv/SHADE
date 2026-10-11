@@ -10,9 +10,13 @@ namespace Shade.Agent.Audio;
 // playing state so it isn't burning CPU on a silent desktop.
 public sealed class SpectrumAnalyzer : IDisposable
 {
-    private const int BandCount = 32;
+    public const int BandCount = 32;
     private const int FftLength = 2048;
     private const int FftExponent = 11; // 2^11 = FftLength
+    // 50% overlap: a new frame every 1024 samples (~47 fps at 48 kHz) instead
+    // of every 2048 (~23 fps). Same frequency resolution, but the bars react
+    // twice as fast to transients like kick drums.
+    private const int HopLength = FftLength / 2;
 
     private readonly float[] _sampleBuffer = new float[FftLength];
     private readonly Complex[] _fftBuffer = new Complex[FftLength];
@@ -95,17 +99,23 @@ public sealed class SpectrumAnalyzer : IDisposable
         var format = _capture!.WaveFormat;
         var bytesPerFrame = format.BitsPerSample / 8 * format.Channels;
 
+        var channels = format.Channels;
+
         for (var offset = 0; offset + bytesPerFrame <= e.BytesRecorded; offset += bytesPerFrame)
         {
-            // Left channel only — plenty for a visualizer, no need to mix down.
+            // Mono downmix of the first two channels — left-only missed
+            // anything panned hard right (common in older stereo mixes).
             var sample = BitConverter.ToSingle(e.Buffer, offset);
+            if (channels > 1) sample = (sample + BitConverter.ToSingle(e.Buffer, offset + 4)) * 0.5f;
             _sampleBuffer[_sampleCount] = sample;
             _sampleCount++;
 
             if (_sampleCount < FftLength) continue;
 
             ProcessFft();
-            _sampleCount = 0;
+            // Keep the newest half as the start of the next window.
+            Array.Copy(_sampleBuffer, HopLength, _sampleBuffer, 0, FftLength - HopLength);
+            _sampleCount = FftLength - HopLength;
         }
     }
 

@@ -29,6 +29,22 @@ class ShadePreferences(context: Context) {
         get() = prefs.getBoolean(KEY_KEEP_SCREEN_ON, false)
         set(value) = prefs.edit { putBoolean(KEY_KEEP_SCREEN_ON, value) }
 
+    // Hides status/navigation bars (swipe from an edge to peek) — the panel
+    // reads as a dedicated device instead of a phone running an app.
+    var immersive: Boolean
+        get() = prefs.getBoolean(KEY_IMMERSIVE, true)
+        set(value) = prefs.edit { putBoolean(KEY_IMMERSIVE, value) }
+
+    var clockSeconds: Boolean
+        get() = prefs.getBoolean(KEY_CLOCK_SECONDS, true)
+        set(value) = prefs.edit { putBoolean(KEY_CLOCK_SECONDS, value) }
+
+    // Slowly drifts static content (clock, player chrome) by a few dp so an
+    // OLED panel left on for hours doesn't burn in the same pixels.
+    var burnInProtection: Boolean
+        get() = prefs.getBoolean(KEY_BURN_IN, true)
+        set(value) = prefs.edit { putBoolean(KEY_BURN_IN, value) }
+
     var swipeRight: NavScreen?
         get() = getDirection(KEY_SWIPE_RIGHT, NavScreen.STATS)
         set(value) = setDirection(KEY_SWIPE_RIGHT, value)
@@ -69,6 +85,9 @@ class ShadePreferences(context: Context) {
         const val KEY_TRANSPORT = "transport"
         const val KEY_DEVICE_ADDRESS = "device_address"
         const val KEY_KEEP_SCREEN_ON = "keep_screen_on"
+        const val KEY_IMMERSIVE = "immersive"
+        const val KEY_CLOCK_SECONDS = "clock_seconds"
+        const val KEY_BURN_IN = "burn_in_protection"
         const val KEY_SWIPE_RIGHT = "swipe_right"
         const val KEY_SWIPE_LEFT = "swipe_left"
         const val KEY_SWIPE_UP = "swipe_up"

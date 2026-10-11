@@ -23,6 +23,18 @@ public sealed class SystemVolumeController : IDisposable
 
     public double GetVolume() => _device.AudioEndpointVolume.MasterVolumeLevelScalar;
 
+    public bool GetMuted() => _device.AudioEndpointVolume.Mute;
+
+    // Absolute set, driven by the panel's volume slider. Unmutes on the way —
+    // dragging the slider while muted and hearing nothing would read as broken.
+    public void SetVolume(double level)
+    {
+        _device.AudioEndpointVolume.MasterVolumeLevelScalar = (float)Math.Clamp(level, 0d, 1d);
+        if (_device.AudioEndpointVolume.Mute) _device.AudioEndpointVolume.Mute = false;
+    }
+
+    public void ToggleMute() => _device.AudioEndpointVolume.Mute = !_device.AudioEndpointVolume.Mute;
+
     public void VolumeUp() => Adjust(Step);
 
     public void VolumeDown() => Adjust(-Step);

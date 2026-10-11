@@ -10,6 +10,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -131,6 +133,13 @@ class ShadeBluetoothTransport(
                 delay(reconnectDelayMs)
                 reconnectDelayMs = (reconnectDelayMs * 2).coerceAtMost(MAX_RECONNECT_DELAY_MS)
                 continue
+            }
+
+            // connect() blocks for seconds; disconnect() may have been called
+            // meanwhile — don't adopt a socket nobody owns anymore.
+            if (!currentCoroutineContext().isActive) {
+                runCatching { newSocket.close() }
+                return
             }
 
             socket = newSocket

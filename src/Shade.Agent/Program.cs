@@ -49,8 +49,7 @@ smtc.TrackChanged += track =>
         _ = PushResizedArtAsync(track.ArtHash, track.ArtBytes);
     }
 
-    _ = clientHub.BroadcastAsync(new TrackMessage(
-        track.Title, track.Artist, track.Album, track.DurationMs, track.ArtHash));
+    _ = clientHub.BroadcastAsync(ToTrackMessage(track));
 
     var lyricsKey = $"{track.Title}|{track.Artist}";
     if (lyricsKey != lastLyricsKey)
@@ -76,11 +75,19 @@ void BroadcastState(PlaybackState state)
     else
     {
         spectrumAnalyzer.Stop();
-        _ = clientHub.BroadcastAsync(new SpectrumMessage(new float[32]));
+        _ = clientHub.BroadcastAsync(new SpectrumMessage(new float[SpectrumAnalyzer.BandCount]));
     }
 
-    _ = clientHub.BroadcastAsync(new StateMessage(state.Playing, state.PositionMs, state.TimestampMs, volumeController.GetVolume()));
+    _ = clientHub.BroadcastAsync(ToStateMessage(state));
 }
+
+TrackMessage ToTrackMessage(TrackInfo track) =>
+    new(track.Title, track.Artist, track.Album, track.DurationMs, track.ArtHash, track.AppName);
+
+StateMessage ToStateMessage(PlaybackState state) =>
+    new(state.Playing, state.PositionMs, state.TimestampMs,
+        volumeController.GetVolume(), volumeController.GetMuted(),
+        state.Shuffle, state.Repeat);
 
 smtc.StateChanged += BroadcastState;
 
@@ -142,8 +149,7 @@ async Task SendCatchUpAsync(IClientConnection connection, CancellationToken ct)
 {
     if (smtc.CurrentTrack is { } track)
     {
-        await clientHub.SendToAsync(connection, new TrackMessage(
-            track.Title, track.Artist, track.Album, track.DurationMs, track.ArtHash), ct);
+        await clientHub.SendToAsync(connection, ToTrackMessage(track), ct);
         if (track.ArtBytes is not null && track.ArtHash is not null
             && await TryResizeArtForBluetoothAsync(track.ArtBytes) is { } resized)
         {
@@ -152,7 +158,7 @@ async Task SendCatchUpAsync(IClientConnection connection, CancellationToken ct)
     }
     if (smtc.CurrentState is { } state)
     {
-        await clientHub.SendToAsync(connection, new StateMessage(state.Playing, state.PositionMs, state.TimestampMs, volumeController.GetVolume()), ct);
+        await clientHub.SendToAsync(connection, ToStateMessage(state), ct);
     }
     if (currentLyrics is { } lyrics)
     {

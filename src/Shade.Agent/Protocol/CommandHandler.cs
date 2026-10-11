@@ -53,6 +53,19 @@ public static class CommandHandler
             case "volumeDown":
                 volumeController.VolumeDown();
                 break;
+            case "setVolume":
+                if (command.Value is { } level)
+                    volumeController.SetVolume(level);
+                break;
+            case "toggleMute":
+                volumeController.ToggleMute();
+                break;
+            case "toggleShuffle":
+                await smtc.TryToggleShuffleAsync();
+                break;
+            case "cycleRepeat":
+                await smtc.TryCycleRepeatAsync();
+                break;
             case "seek":
                 if (command.Value is { } positionMs)
                     await smtc.TrySeekAsync((long)positionMs);

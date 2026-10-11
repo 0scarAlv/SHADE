@@ -1,48 +1,102 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Shade</string>
-    <string name="no_track">Sin reproducción</string>
+
+    <!-- Player -->
+    <string name="no_track">Nada sonando</string>
+    <string name="no_track_hint">Reproduce algo en tu PC</string>
+    <string name="waiting_for_agent">Esperando al agente de Shade en la PC…</string>
+    <string name="playing_on">Sonando en %1$s</string>
+    <string name="no_lyrics_available">Sin letra disponible</string>
     <string name="status_connected">Conectado</string>
     <string name="status_connecting">Conectando…</string>
     <string name="status_disconnected">Desconectado</string>
     <string name="action_previous">Anterior</string>
     <string name="action_play_pause">Reproducir o pausar</string>
     <string name="action_next">Siguiente</string>
+    <string name="action_shuffle">Aleatorio</string>
+    <string name="action_repeat">Repetir</string>
+    <string name="action_mute">Silenciar</string>
+    <string name="action_lyrics">Mostrar u ocultar la letra</string>
     <string name="action_volume_up">Subir volumen</string>
     <string name="action_volume_down">Bajar volumen</string>
     <string name="action_back">Atrás</string>
+    <string name="action_home">Inicio</string>
+    <string name="action_refresh">Actualizar</string>
+    <string name="action_close">Cerrar</string>
     <string name="action_keep_screen_on">Mantener la pantalla encendida</string>
     <string name="action_keep_screen_on_off">Dejar que la pantalla se apague sola</string>
+
+    <!-- Home -->
+    <string name="greeting_morning">Buenos días</string>
+    <string name="greeting_afternoon">Buenas tardes</string>
+    <string name="greeting_evening">Buenas noches</string>
+    <string name="home_section_panel">Panel</string>
+    <string name="home_swipe_hint">Desliza hacia arriba para abrir el reproductor</string>
+    <string name="home_stats_live">CPU %1$d%% · RAM %2$d%%</string>
+    <string name="home_stats_idle">CPU, RAM, red y disco</string>
+    <string name="home_clock_subtitle">Reloj de escritorio</string>
+    <string name="home_gestures_subtitle">Personaliza los deslizamientos</string>
+    <string name="home_settings_subtitle">Pantalla y reloj</string>
     <string name="tile_player">Reproductor</string>
+    <string name="tile_stats">Rendimiento</string>
+    <string name="tile_clock">Reloj</string>
     <string name="tile_connection">Conexión</string>
-    <string name="tile_coming_soon">Próximamente</string>
+    <string name="tile_gestures">Gestos</string>
+    <string name="tile_settings">Ajustes</string>
+
+    <!-- Connection -->
     <string name="connection_title">Conexión</string>
-    <string name="connection_transport_usb">USB (desarrollo)</string>
+    <string name="connection_section_transport">Cómo se conecta a la PC</string>
+    <string name="connection_transport_usb">USB</string>
+    <string name="connection_transport_usb_desc">Cable con depuración USB · ideal para desarrollo</string>
+    <string name="connection_transport_usb_short">USB</string>
     <string name="connection_transport_bluetooth">Bluetooth</string>
-    <string name="connection_grant_permission">Conceder permiso de Bluetooth</string>
-    <string name="connection_no_bonded_devices">No hay dispositivos Bluetooth emparejados. Emparejá la PC primero desde los ajustes de Bluetooth del sistema.</string>
+    <string name="connection_transport_bluetooth_desc">Sin cables · con la PC emparejada</string>
+    <string name="connection_transport_bluetooth_short">Bluetooth</string>
+    <string name="connection_permission_explainer">Shade necesita permiso de Bluetooth para ver las PCs emparejadas y conectarse a ellas.</string>
+    <string name="connection_grant_permission">Conceder permiso</string>
+    <string name="connection_no_bonded_devices">No hay dispositivos Bluetooth emparejados. Empareja la PC primero desde los ajustes de Bluetooth del sistema.</string>
     <string name="connection_paired_devices">Dispositivos emparejados</string>
     <string name="connection_selected_badge">PC seleccionada</string>
-    <string name="no_lyrics_available">Sin letra disponible</string>
+
+    <!-- Resources -->
+    <string name="resource_title">Rendimiento</string>
+    <string name="resource_subtitle">Tu PC en tiempo real · último minuto</string>
     <string name="resource_waiting">Esperando datos de la PC…</string>
-    <string name="resource_ram">Memoria RAM</string>
+    <string name="resource_ram">Memoria</string>
     <string name="resource_cpu">Procesador</string>
-    <string name="resource_network_down">Descarga</string>
-    <string name="resource_network_up">Carga</string>
+    <string name="resource_network">Red</string>
+    <string name="resource_disk">Disco</string>
     <string name="resource_battery">Batería</string>
-    <string name="resource_top_ram">Mayor uso de RAM</string>
+    <string name="resource_tap_for_processes">Toca para ver procesos</string>
+    <string name="resource_top_ram">Mayor uso de memoria</string>
     <string name="resource_top_cpu">Mayor uso de CPU</string>
-    <string name="resource_disk_read">Lectura de disco</string>
-    <string name="resource_disk_write">Escritura de disco</string>
-    <string name="tile_gestures">Gestos</string>
+
+    <!-- Gestures -->
     <string name="gesture_settings_title">Gestos</string>
+    <string name="gesture_settings_subtitle">Qué pantalla abre cada deslizamiento</string>
     <string name="gesture_direction_right">Deslizar a la derecha</string>
     <string name="gesture_direction_left">Deslizar a la izquierda</string>
     <string name="gesture_direction_up">Deslizar hacia arriba</string>
     <string name="gesture_direction_down">Deslizar hacia abajo</string>
     <string name="nav_screen_player">Reproductor</string>
-    <string name="nav_screen_stats">Estadísticas</string>
+    <string name="nav_screen_stats">Rendimiento</string>
     <string name="nav_screen_clock">Reloj</string>
     <string name="nav_screen_home">Inicio</string>
     <string name="nav_screen_none">Ninguno</string>
+
+    <!-- Settings -->
+    <string name="settings_title">Ajustes</string>
+    <string name="settings_section_display">Pantalla</string>
+    <string name="settings_keep_screen_on">Mantener encendida</string>
+    <string name="settings_keep_screen_on_desc">La pantalla no se apaga mientras Shade está abierto</string>
+    <string name="settings_immersive">Pantalla completa</string>
+    <string name="settings_immersive_desc">Oculta las barras del sistema · desliza desde el borde para verlas</string>
+    <string name="settings_burn_in">Protección de pantalla</string>
+    <string name="settings_burn_in_desc">Mueve el contenido unos píxeles cada minuto para evitar marcas en OLED</string>
+    <string name="settings_section_clock">Reloj</string>
+    <string name="settings_clock_seconds">Mostrar segundos</string>
+    <string name="settings_clock_seconds_desc">Segundos animados junto a la hora</string>
+    <string name="settings_about">Shade %1$s · panel de música para tu PC</string>
 </resources>

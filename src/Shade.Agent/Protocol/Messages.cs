@@ -7,7 +7,8 @@ public sealed record TrackMessage(
     string Artist,
     string Album,
     long DurationMs,
-    string? ArtHash)
+    string? ArtHash,
+    string? AppName = null)
 {
     public string Type => "track";
 }
@@ -16,7 +17,10 @@ public sealed record StateMessage(
     bool Playing,
     long PositionMs,
     long TimestampMs,
-    double? Volume = null)
+    double? Volume = null,
+    bool? Muted = null,
+    bool? Shuffle = null,
+    string? Repeat = null)
 {
     public string Type => "state";
 }

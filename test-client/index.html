@@ -64,6 +64,12 @@
     <button id="playPause">⏯</button>
     <button id="next">⏭</button>
   </div>
+  <div id="controls">
+    <button id="toggleShuffle" title="Aleatorio">🔀</button>
+    <button id="cycleRepeat" title="Repetir">🔁</button>
+    <button id="toggleMute" title="Silenciar">🔇</button>
+    <input id="volume" type="range" min="0" max="100" value="50" title="Volumen">
+  </div>
   <div id="log"></div>
 
 <script>
@@ -156,15 +162,19 @@ setInterval(() => {
   timeEl.textContent = `${fmt(lastPositionMs + elapsed)} / ${fmt(durationMs)}`;
 }, 500);
 
-function sendCommand(action) {
+function sendCommand(action, value) {
   if (socket && socket.readyState === WebSocket.OPEN) {
-    socket.send(JSON.stringify({ type: "cmd", action }));
+    socket.send(JSON.stringify({ type: "cmd", action, value }));
   }
 }
 
 document.getElementById("playPause").onclick = () => sendCommand("playPause");
 document.getElementById("next").onclick = () => sendCommand("next");
 document.getElementById("prev").onclick = () => sendCommand("prev");
+document.getElementById("toggleShuffle").onclick = () => sendCommand("toggleShuffle");
+document.getElementById("cycleRepeat").onclick = () => sendCommand("cycleRepeat");
+document.getElementById("toggleMute").onclick = () => sendCommand("toggleMute");
+document.getElementById("volume").oninput = (e) => sendCommand("setVolume", e.target.value / 100);
 
 connect();
 </script>

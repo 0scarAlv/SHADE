@@ -1,13 +1,20 @@
 package com.shade.panel.ui
 
+import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import androidx.lifecycle.viewmodel.initializer
+import androidx.lifecycle.viewmodel.viewModelFactory
 import com.shade.panel.data.ConnectionState
 import com.shade.panel.data.LyricsLine
 import com.shade.panel.data.ProcessEntry
 import com.shade.panel.data.ResourceMessage
+import com.shade.panel.data.ShadeBluetoothTransport
+import com.shade.panel.data.ShadePreferences
 import com.shade.panel.data.ShadeSocket
 import com.shade.panel.data.ShadeTransport
+import com.shade.panel.data.Transport
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -18,9 +25,11 @@ import kotlinx.coroutines.launch
 
 data class PanelUiState(
     val connection: ConnectionState = ConnectionState.DISCONNECTED,
+    val transport: Transport = Transport.WEBSOCKET,
     val title: String = "",
     val artist: String = "",
     val album: String = "",
+    val appName: String? = null,
     val artHash: String? = null,
     val artUrl: String? = null,
     val artBytes: ByteArray? = null,
@@ -28,24 +37,71 @@ data class PanelUiState(
     val positionMs: Long = 0,
     val durationMs: Long = 0,
     val volume: Double? = null,
+    val muted: Boolean = false,
+    val shuffle: Boolean? = null,
+    val repeat: String? = null,
     val lyricsLines: List<LyricsLine> = emptyList(),
     val currentLyricsIndex: Int = -1,
-    val spectrumBands: List<Float> = List(BAND_COUNT) { 0f },
     val resource: ResourceMessage? = null,
     // Non-null metric means the drilldown overlay should be showing; entries
     // stay null while the reply is in flight (drives a loading state).
     val processDrilldownMetric: String? = null,
     val processDrilldownEntries: List<ProcessEntry>? = null,
+) {
+    val art: Any? get() = artBytes ?: artUrl
+    val hasTrack: Boolean get() = title.isNotBlank()
+}
+
+// Rolling ~60s of resource samples. Lives in the ViewModel (not the stats
+// screen) so the graphs keep filling while the user is on another screen
+// and are already populated when they swipe back.
+data class ResourceHistory(
+    val cpu: List<Float> = emptyList(),
+    val ram: List<Float> = emptyList(),
+    val netDown: List<Float> = emptyList(),
+    val netUp: List<Float> = emptyList(),
+    val diskRead: List<Float> = emptyList(),
+    val diskWrite: List<Float> = emptyList(),
 )
 
 const val BAND_COUNT = 32
+const val HISTORY_SIZE = 60
+
+// Builds the transport from the user's saved preference each time it's
+// called, so restartTransport() picks up a changed setting.
+fun panelViewModelFactory(context: Context) = viewModelFactory {
+    initializer {
+        val appContext = context.applicationContext
+        val preferences = ShadePreferences(appContext)
+        PanelViewModel(
+            transportFactory = {
+                if (preferences.transport == Transport.BLUETOOTH) {
+                    ShadeBluetoothTransport(appContext) { preferences.pairedDeviceAddress }
+                } else {
+                    ShadeSocket()
+                }
+            },
+            transportKind = { preferences.transport },
+        )
+    }
+}
 
 class PanelViewModel(
-    private val transport: ShadeTransport = ShadeSocket(),
+    private val transportFactory: () -> ShadeTransport = { ShadeSocket() },
+    private val transportKind: () -> Transport = { Transport.WEBSOCKET },
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(PanelUiState())
     val uiState: StateFlow<PanelUiState> = _uiState.asStateFlow()
+
+    // Spectrum frames arrive 20-50 times a second. Keeping them out of
+    // PanelUiState means only the visualizer redraws per frame instead of
+    // every composable that reads the UI state recomposing at that rate.
+    private val _spectrum = MutableStateFlow(FloatArray(BAND_COUNT))
+    val spectrum: StateFlow<FloatArray> = _spectrum.asStateFlow()
+
+    private val _resourceHistory = MutableStateFlow(ResourceHistory())
+    val resourceHistory: StateFlow<ResourceHistory> = _resourceHistory.asStateFlow()
 
     // Base point for local interpolation: SMTC only reports position in jumps
     // (restriction #1 in the design), so between "state" messages we advance
@@ -56,122 +112,16 @@ class PanelViewModel(
     private var lyricsLines: List<LyricsLine> = emptyList()
     private var lastTrackKey: String? = null
 
-    init {
-        transport.connect()
+    private var transport: ShadeTransport = transportFactory()
+    private var transportJob: Job? = null
 
-        viewModelScope.launch {
-            transport.connectionState.collect { status ->
-                _uiState.update { it.copy(connection = status) }
-            }
-        }
-        viewModelScope.launch {
-            transport.trackUpdates.collect { track ->
-                // SMTC can re-fire "track changed" several times for the same
-                // song (partial metadata updates). Only wipe the lyrics we
-                // already have when it's actually a different song — otherwise
-                // a slow LRCLIB lookup keeps getting cancelled out by the next
-                // duplicate event before it ever reaches the screen.
-                val key = "${track.title}|${track.artist}"
-                val isNewTrack = key != lastTrackKey
-                if (isNewTrack) {
-                    lastTrackKey = key
-                    lyricsLines = emptyList()
-                }
-                _uiState.update {
-                    it.copy(
-                        title = track.title,
-                        artist = track.artist,
-                        album = track.album,
-                        durationMs = track.durationMs,
-                        artHash = track.artHash,
-                        artUrl = track.artHash?.let { hash -> "$ART_BASE_URL/$hash" },
-                        // Cleared until the Bluetooth transport's matching push
-                        // arrives (see artUpdates below) — WebSocket doesn't push
-                        // art at all, it just uses artUrl above.
-                        artBytes = null,
-                        lyricsLines = if (isNewTrack) emptyList() else it.lyricsLines,
-                        currentLyricsIndex = if (isNewTrack) -1 else it.currentLyricsIndex,
-                    )
-                }
-            }
-        }
-        viewModelScope.launch {
-            transport.artUpdates.collect { art ->
-                // Guards against a stale push arriving after a fast double
-                // track-change — only apply it if it still matches the track
-                // currently on screen.
-                _uiState.update { if (it.artHash == art.hash) it.copy(artBytes = art.bytes) else it }
-            }
-        }
-        viewModelScope.launch {
-            transport.stateUpdates.collect { state ->
-                // SMTC's TimelinePropertiesChanged fires roughly every second
-                // even without a real change, and the position it reports can
-                // lag the true elapsed time by up to ~1s depending on when the
-                // source app last ticked its own timeline. Re-anchoring the
-                // local interpolation on every one of these made the displayed
-                // second visibly hop backward and forward (21, 22, 21, 22...).
-                // Only re-anchor on an actual discontinuity — play/pause
-                // toggling or a drift bigger than that jitter margin (seek,
-                // track change) — otherwise let interpolation keep counting
-                // up uninterrupted.
-                val wasPlaying = _uiState.value.playing
-                val predictedMs = if (wasPlaying && baseTimestampMs > 0) {
-                    basePositionMs + (System.currentTimeMillis() - baseTimestampMs)
-                } else {
-                    basePositionMs
-                }
-                val driftMs = state.positionMs - predictedMs
-                if (!state.playing || state.playing != wasPlaying || kotlin.math.abs(driftMs) > POSITION_DRIFT_TOLERANCE_MS) {
-                    basePositionMs = state.positionMs
-                    baseTimestampMs = state.timestampMs
-                }
-                _uiState.update {
-                    it.copy(
-                        playing = state.playing,
-                        positionMs = if (!state.playing) state.positionMs else it.positionMs,
-                        volume = state.volume ?: it.volume,
-                    )
-                }
-            }
-        }
-        viewModelScope.launch {
-            transport.lyricsUpdates.collect { lyrics ->
-                lyricsLines = lyrics.lines.orEmpty()
-                val index = indexAt(_uiState.value.positionMs)
-                _uiState.update { it.copy(lyricsLines = lyricsLines, currentLyricsIndex = index) }
-            }
-        }
-        viewModelScope.launch {
-            transport.spectrumUpdates.collect { spectrum ->
-                val incoming = spectrum.bands
-                _uiState.update { current ->
-                    // Light smoothing between frames so the bars glide instead
-                    // of jumping — the agent already sends ~20-30 frames/sec,
-                    // this just takes the edge off.
-                    val smoothed = current.spectrumBands.mapIndexed { i, previous ->
-                        val target = incoming.getOrElse(i) { 0f }
-                        previous * 0.4f + target * 0.6f
-                    }
-                    current.copy(spectrumBands = smoothed)
-                }
-            }
-        }
-        viewModelScope.launch {
-            transport.resourceUpdates.collect { resource ->
-                _uiState.update { it.copy(resource = resource) }
-            }
-        }
-        viewModelScope.launch {
-            transport.processUpdates.collect { msg ->
-                // Guards against a stale reply arriving after the overlay was
-                // dismissed or reopened for the other metric — same shape as
-                // the artUpdates guard above.
-                _uiState.update {
-                    if (it.processDrilldownMetric == msg.metric) it.copy(processDrilldownEntries = msg.processes) else it
-                }
-            }
-        }
+    // While the user drags the volume slider, incoming state echoes would
+    // otherwise yank the thumb back to slightly stale values mid-drag.
+    private var volumeDragUntilMs = 0L
+
+    init {
+        startTransport()
+
         viewModelScope.launch {
             while (isActive) {
                 delay(INTERPOLATION_TICK_MS)
@@ -186,19 +136,216 @@ class PanelViewModel(
                 } else {
                     current.positionMs
                 }
-                _uiState.update { it.copy(positionMs = positionMs, currentLyricsIndex = indexAt(positionMs)) }
+                val index = indexAt(positionMs)
+                if (positionMs != current.positionMs || index != current.currentLyricsIndex) {
+                    _uiState.update { it.copy(positionMs = positionMs, currentLyricsIndex = index) }
+                }
             }
         }
     }
 
+    // Swaps to a freshly built transport (after the user changes it on the
+    // connection screen) without throwing away the ViewModel — every screen
+    // keeps observing the same flows.
+    fun restartTransport() {
+        transportJob?.cancel()
+        transport.disconnect()
+        transport = transportFactory()
+        lastTrackKey = null
+        lyricsLines = emptyList()
+        _uiState.value = PanelUiState()
+        _spectrum.value = FloatArray(BAND_COUNT)
+        startTransport()
+    }
+
+    private fun startTransport() {
+        val active = transport
+        _uiState.update { it.copy(transport = transportKind()) }
+        active.connect()
+
+        transportJob = viewModelScope.launch {
+            launch {
+                active.connectionState.collect { status ->
+                    _uiState.update { it.copy(connection = status) }
+                    if (status != ConnectionState.CONNECTED) _spectrum.value = FloatArray(BAND_COUNT)
+                }
+            }
+            launch {
+                active.trackUpdates.collect { track ->
+                    // SMTC can re-fire "track changed" several times for the same
+                    // song (partial metadata updates). Only wipe the lyrics we
+                    // already have when it's actually a different song — otherwise
+                    // a slow LRCLIB lookup keeps getting cancelled out by the next
+                    // duplicate event before it ever reaches the screen.
+                    val key = "${track.title}|${track.artist}"
+                    val isNewTrack = key != lastTrackKey
+                    if (isNewTrack) {
+                        lastTrackKey = key
+                        lyricsLines = emptyList()
+                    }
+                    _uiState.update {
+                        it.copy(
+                            title = track.title,
+                            artist = track.artist,
+                            album = track.album,
+                            appName = track.appName,
+                            durationMs = track.durationMs,
+                            artHash = track.artHash,
+                            artUrl = track.artHash?.let { hash -> "$ART_BASE_URL/$hash" },
+                            // Cleared until the Bluetooth transport's matching push
+                            // arrives (see artUpdates below) — unless it's the same
+                            // art as before (duplicate SMTC event), which would
+                            // otherwise blink the cover off and on.
+                            artBytes = if (track.artHash == it.artHash) it.artBytes else null,
+                            lyricsLines = if (isNewTrack) emptyList() else it.lyricsLines,
+                            currentLyricsIndex = if (isNewTrack) -1 else it.currentLyricsIndex,
+                        )
+                    }
+                }
+            }
+            launch {
+                active.artUpdates.collect { art ->
+                    // Guards against a stale push arriving after a fast double
+                    // track-change — only apply it if it still matches the track
+                    // currently on screen.
+                    _uiState.update { if (it.artHash == art.hash) it.copy(artBytes = art.bytes) else it }
+                }
+            }
+            launch {
+                active.stateUpdates.collect { state ->
+                    // SMTC's TimelinePropertiesChanged fires roughly every second
+                    // even without a real change, and the position it reports can
+                    // lag the true elapsed time by up to ~1s depending on when the
+                    // source app last ticked its own timeline. Re-anchoring the
+                    // local interpolation on every one of these made the displayed
+                    // second visibly hop backward and forward (21, 22, 21, 22...).
+                    // Only re-anchor on an actual discontinuity — play/pause
+                    // toggling or a drift bigger than that jitter margin (seek,
+                    // track change) — otherwise let interpolation keep counting
+                    // up uninterrupted.
+                    val wasPlaying = _uiState.value.playing
+                    val predictedMs = if (wasPlaying && baseTimestampMs > 0) {
+                        basePositionMs + (System.currentTimeMillis() - baseTimestampMs)
+                    } else {
+                        basePositionMs
+                    }
+                    val driftMs = state.positionMs - predictedMs
+                    if (!state.playing || state.playing != wasPlaying || kotlin.math.abs(driftMs) > POSITION_DRIFT_TOLERANCE_MS) {
+                        basePositionMs = state.positionMs
+                        baseTimestampMs = state.timestampMs
+                    }
+                    val dragging = System.currentTimeMillis() < volumeDragUntilMs
+                    _uiState.update {
+                        it.copy(
+                            playing = state.playing,
+                            positionMs = if (!state.playing) state.positionMs else it.positionMs,
+                            volume = if (dragging) it.volume else state.volume ?: it.volume,
+                            muted = state.muted ?: it.muted,
+                            shuffle = state.shuffle,
+                            repeat = state.repeat,
+                        )
+                    }
+                }
+            }
+            launch {
+                active.lyricsUpdates.collect { lyrics ->
+                    lyricsLines = lyrics.lines.orEmpty()
+                    val index = indexAt(_uiState.value.positionMs)
+                    _uiState.update { it.copy(lyricsLines = lyricsLines, currentLyricsIndex = index) }
+                }
+            }
+            launch {
+                active.spectrumUpdates.collect { spectrum ->
+                    val incoming = spectrum.bands
+                    _spectrum.value = FloatArray(BAND_COUNT) { i -> incoming.getOrElse(i) { 0f } }
+                }
+            }
+            launch {
+                active.resourceUpdates.collect { resource ->
+                    _uiState.update { it.copy(resource = resource) }
+                    recordHistory(resource)
+                }
+            }
+            launch {
+                active.processUpdates.collect { msg ->
+                    // Guards against a stale reply arriving after the overlay was
+                    // dismissed or reopened for the other metric — same shape as
+                    // the artUpdates guard above.
+                    _uiState.update {
+                        if (it.processDrilldownMetric == msg.metric) it.copy(processDrilldownEntries = msg.processes) else it
+                    }
+                }
+            }
+        }
+    }
+
+    private fun recordHistory(r: ResourceMessage) {
+        val ramFraction = if (r.ramTotalBytes > 0) {
+            (r.ramUsedBytes.toFloat() / r.ramTotalBytes.toFloat()).coerceIn(0f, 1f)
+        } else 0f
+        _resourceHistory.update { h ->
+            ResourceHistory(
+                cpu = h.cpu.pushed((r.cpuUsagePercent.toFloat() / 100f).coerceIn(0f, 1f)),
+                ram = h.ram.pushed(ramFraction),
+                netDown = h.netDown.pushed(r.netDownBytesPerSec.toFloat()),
+                netUp = h.netUp.pushed(r.netUpBytesPerSec.toFloat()),
+                diskRead = h.diskRead.pushed(r.diskReadBytesPerSec.toFloat()),
+                diskWrite = h.diskWrite.pushed(r.diskWriteBytesPerSec.toFloat()),
+            )
+        }
+    }
+
+    private fun List<Float>.pushed(value: Float): List<Float> =
+        if (size >= HISTORY_SIZE) drop(size - HISTORY_SIZE + 1) + value else this + value
+
     private fun indexAt(positionMs: Long): Int =
         lyricsLines.indexOfLast { it.timeMs <= positionMs }
 
-    fun playPause() = transport.sendCommand("playPause")
+    fun playPause() {
+        // Optimistic flip so the button reacts instantly; the agent's state
+        // echo (usually <100ms later) confirms or corrects it. Re-anchor the
+        // interpolation at the current position, or resuming would jump
+        // ahead by however long playback had been paused.
+        basePositionMs = _uiState.value.positionMs
+        baseTimestampMs = System.currentTimeMillis()
+        _uiState.update { it.copy(playing = !it.playing) }
+        transport.sendCommand("playPause")
+    }
+
     fun next() = transport.sendCommand("next")
     fun prev() = transport.sendCommand("prev")
     fun volumeUp() = transport.sendCommand("volumeUp")
     fun volumeDown() = transport.sendCommand("volumeDown")
+    fun toggleMute() {
+        _uiState.update { it.copy(muted = !it.muted) }
+        transport.sendCommand("toggleMute")
+    }
+
+    fun toggleShuffle() {
+        _uiState.update { it.copy(shuffle = it.shuffle?.not()) }
+        transport.sendCommand("toggleShuffle")
+    }
+
+    fun cycleRepeat() {
+        _uiState.update {
+            it.copy(
+                repeat = when (it.repeat) {
+                    "none" -> "list"
+                    "list" -> "track"
+                    "track" -> "none"
+                    else -> it.repeat
+                },
+            )
+        }
+        transport.sendCommand("cycleRepeat")
+    }
+
+    fun setVolume(level: Float) {
+        val clamped = level.coerceIn(0f, 1f)
+        volumeDragUntilMs = System.currentTimeMillis() + VOLUME_ECHO_GRACE_MS
+        _uiState.update { it.copy(volume = clamped.toDouble(), muted = false) }
+        transport.sendCommand("setVolume", value = clamped.toDouble())
+    }
 
     fun seek(positionMs: Long) {
         basePositionMs = positionMs
@@ -217,6 +364,7 @@ class PanelViewModel(
     }
 
     override fun onCleared() {
+        transportJob?.cancel()
         transport.disconnect()
     }
 
@@ -224,5 +372,6 @@ class PanelViewModel(
         const val ART_BASE_URL = "http://127.0.0.1:8080/art"
         const val INTERPOLATION_TICK_MS = 250L
         const val POSITION_DRIFT_TOLERANCE_MS = 900L
+        const val VOLUME_ECHO_GRACE_MS = 600L
     }
 }

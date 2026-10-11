@@ -7,9 +7,14 @@ public sealed record TrackInfo(
     long DurationMs,
     byte[]? ArtBytes,
     string? ArtHash,
-    string? ArtContentType);
+    string? ArtContentType,
+    string? AppName = null);
 
 public sealed record PlaybackState(
     bool Playing,
     long PositionMs,
-    long TimestampMs);
+    long TimestampMs,
+    // Null when the source app doesn't expose shuffle/repeat through SMTC at
+    // all (most browsers) — the panel hides those toggles in that case.
+    bool? Shuffle = null,
+    string? Repeat = null);

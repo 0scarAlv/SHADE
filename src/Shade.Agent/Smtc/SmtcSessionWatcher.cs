@@ -1,6 +1,7 @@
 using System.Runtime.InteropServices.WindowsRuntime;
 using System.Security.Cryptography;
 using System.Linq;
+using Windows.Media;
 using Windows.Media.Control;
 using Windows.Storage.Streams;
 
@@ -205,7 +206,8 @@ public sealed class SmtcSessionWatcher : IAsyncDisposable
                 DurationMs: (long)duration.TotalMilliseconds,
                 ArtBytes: art.Bytes,
                 ArtHash: art.Hash,
-                ArtContentType: art.ContentType);
+                ArtContentType: art.ContentType,
+                AppName: FriendlyAppName(session.SourceAppUserModelId));
 
             CurrentTrack = track;
             TrackChanged?.Invoke(track);
@@ -231,7 +233,15 @@ public sealed class SmtcSessionWatcher : IAsyncDisposable
             var state = new PlaybackState(
                 Playing: playing,
                 PositionMs: (long)timeline.Position.TotalMilliseconds,
-                TimestampMs: NowMs());
+                TimestampMs: NowMs(),
+                Shuffle: playback.IsShuffleActive,
+                Repeat: playback.AutoRepeatMode switch
+                {
+                    MediaPlaybackAutoRepeatMode.None => "none",
+                    MediaPlaybackAutoRepeatMode.Track => "track",
+                    MediaPlaybackAutoRepeatMode.List => "list",
+                    _ => null,
+                });
 
             CurrentState = state;
             StateChanged?.Invoke(state);
@@ -272,6 +282,67 @@ public sealed class SmtcSessionWatcher : IAsyncDisposable
     {
         if (_session is not { } session) return;
         await session.TrySkipPreviousAsync();
+    }
+
+    public async Task TryToggleShuffleAsync()
+    {
+        if (_session is not { } session) return;
+        var current = session.GetPlaybackInfo().IsShuffleActive;
+        if (current is null) return; // source app doesn't support shuffle
+        await session.TryChangeShuffleActiveAsync(!current.Value);
+    }
+
+    // none -> list -> track -> none, same order Spotify's own button cycles in.
+    public async Task TryCycleRepeatAsync()
+    {
+        if (_session is not { } session) return;
+        var current = session.GetPlaybackInfo().AutoRepeatMode;
+        if (current is null) return; // source app doesn't support repeat
+        var next = current.Value switch
+        {
+            MediaPlaybackAutoRepeatMode.None => MediaPlaybackAutoRepeatMode.List,
+            MediaPlaybackAutoRepeatMode.List => MediaPlaybackAutoRepeatMode.Track,
+            _ => MediaPlaybackAutoRepeatMode.None,
+        };
+        await session.TryChangeAutoRepeatModeAsync(next);
+    }
+
+    // SourceAppUserModelId is either an exe name ("Spotify.exe"), a packaged
+    // AUMID ("SpotifyAB.SpotifyMusic_zpdnekdrzrea0!Spotify") or, for Firefox,
+    // an opaque hash — map the common ones to a display name and otherwise
+    // fall back to the most readable fragment of the id.
+    private static readonly (string Hint, string Name)[] KnownApps =
+    {
+        ("spotify", "Spotify"),
+        ("msedge", "Edge"),
+        ("chrome", "Chrome"),
+        ("firefox", "Firefox"),
+        ("308046B0AF4A39CB", "Firefox"),
+        ("brave", "Brave"),
+        ("opera", "Opera"),
+        ("zunemusic", "Reproductor multimedia"),
+        ("applemusic", "Apple Music"),
+        ("tidal", "TIDAL"),
+        ("deezer", "Deezer"),
+        ("vlc", "VLC"),
+        ("foobar", "foobar2000"),
+        ("musicbee", "MusicBee"),
+        ("aimp", "AIMP"),
+    };
+
+    internal static string? FriendlyAppName(string? appId)
+    {
+        if (string.IsNullOrWhiteSpace(appId)) return null;
+
+        foreach (var (hint, name) in KnownApps)
+        {
+            if (appId.Contains(hint, StringComparison.OrdinalIgnoreCase)) return name;
+        }
+
+        var fragment = appId.Contains('!') ? appId[(appId.LastIndexOf('!') + 1)..] : appId;
+        if (fragment.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)) fragment = fragment[..^4];
+        fragment = fragment.Split('.').Last();
+        return fragment.Length == 0 ? null : char.ToUpperInvariant(fragment[0]) + fragment[1..];
     }
 
     public async Task TrySeekAsync(long positionMs)

@@ -21,6 +21,7 @@ import okhttp3.Request
 import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
+import java.util.concurrent.TimeUnit
 
 // Owns the connection to the agent: connect/reconnect-with-backoff, parses
 // incoming track/state frames, and sends control commands. Reconnection is
@@ -28,7 +29,9 @@ import okhttp3.WebSocketListener
 // the app never shows a blank screen, it shows "disconnected" and keeps trying.
 class ShadeSocket(
     private val url: String = "ws://127.0.0.1:8080",
-    private val client: OkHttpClient = OkHttpClient(),
+    // Pings let a dead adb tunnel (cable pulled, agent killed) surface as a
+    // failure within seconds instead of a socket that silently never closes.
+    private val client: OkHttpClient = OkHttpClient.Builder().pingInterval(5, TimeUnit.SECONDS).build(),
 ) : ShadeTransport {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     // encodeDefaults is required: without it, CommandMessage.type (which uses
@@ -42,6 +45,11 @@ class ShadeSocket(
     private var webSocket: WebSocket? = null
     private var reconnectJob: Job? = null
     private var reconnectDelayMs = INITIAL_RECONNECT_DELAY_MS
+
+    // Set by disconnect(). Without it, close() -> onClosed -> scheduleReconnect
+    // revived a transport its owner had already thrown away, leaving a
+    // zombie connection running in the background after every transport switch.
+    @Volatile private var stopped = false
 
     private val _connectionState = MutableStateFlow(ConnectionState.DISCONNECTED)
     override val connectionState: StateFlow<ConnectionState> = _connectionState.asStateFlow()
@@ -70,15 +78,22 @@ class ShadeSocket(
     override val artUpdates: SharedFlow<ArtPayload> = _artUpdates.asSharedFlow()
 
     override fun connect() {
+        stopped = false
+        openSocket()
+    }
+
+    private fun openSocket() {
         reconnectJob?.cancel()
         _connectionState.value = ConnectionState.CONNECTING
         webSocket = client.newWebSocket(Request.Builder().url(url).build(), listener)
     }
 
     override fun disconnect() {
+        stopped = true
         reconnectJob?.cancel()
         webSocket?.close(NORMAL_CLOSURE_CODE, null)
         webSocket = null
+        _connectionState.value = ConnectionState.DISCONNECTED
     }
 
     override fun sendCommand(action: String, value: Double?) {
@@ -87,11 +102,13 @@ class ShadeSocket(
 
     private val listener = object : WebSocketListener() {
         override fun onOpen(webSocket: WebSocket, response: Response) {
+            if (webSocket !== this@ShadeSocket.webSocket) return
             reconnectDelayMs = INITIAL_RECONNECT_DELAY_MS
             _connectionState.value = ConnectionState.CONNECTED
         }
 
         override fun onMessage(webSocket: WebSocket, text: String) {
+            if (webSocket !== this@ShadeSocket.webSocket) return
             val element = runCatching { json.parseToJsonElement(text).jsonObject }.getOrNull() ?: return
             when (element["type"]?.jsonPrimitive?.contentOrNull) {
                 "track" -> runCatching { json.decodeFromJsonElement(TrackMessage.serializer(), element) }
@@ -109,17 +126,26 @@ class ShadeSocket(
             }
         }
 
-        override fun onClosed(webSocket: WebSocket, code: Int, reason: String) = scheduleReconnect()
+        // Callbacks from a socket that's already been replaced are ignored —
+        // otherwise a late onFailure from the previous attempt schedules a
+        // second, parallel reconnect loop.
+        override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+            if (webSocket === this@ShadeSocket.webSocket) scheduleReconnect()
+        }
 
-        override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) = scheduleReconnect()
+        override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+            if (webSocket === this@ShadeSocket.webSocket) scheduleReconnect()
+        }
     }
 
     private fun scheduleReconnect() {
         _connectionState.value = ConnectionState.DISCONNECTED
+        if (stopped) return
+        reconnectJob?.cancel()
         reconnectJob = scope.launch {
             delay(reconnectDelayMs)
             reconnectDelayMs = (reconnectDelayMs * 2).coerceAtMost(MAX_RECONNECT_DELAY_MS)
-            connect()
+            if (!stopped) openSocket()
         }
     }
 

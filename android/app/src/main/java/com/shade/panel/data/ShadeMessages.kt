@@ -11,6 +11,9 @@ data class TrackMessage(
     val album: String,
     val durationMs: Long,
     val artHash: String? = null,
+    // Display name of the source app ("Spotify", "Chrome", ...). Optional so
+    // an older agent without it still parses.
+    val appName: String? = null,
 )
 
 @Serializable
@@ -19,6 +22,11 @@ data class StateMessage(
     val positionMs: Long,
     val timestampMs: Long,
     val volume: Double? = null,
+    val muted: Boolean? = null,
+    // Null = the source app doesn't support it through SMTC (hide the toggle).
+    val shuffle: Boolean? = null,
+    // "none" | "track" | "list", or null when unsupported.
+    val repeat: String? = null,
 )
 
 @Serializable
