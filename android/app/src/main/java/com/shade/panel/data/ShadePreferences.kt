@@ -45,8 +45,8 @@ class ShadePreferences(context: Context) {
         get() = prefs.getBoolean(KEY_BURN_IN, true)
         set(value) = prefs.edit { putBoolean(KEY_BURN_IN, value) }
 
-    // Color of the VFD-style display in the Hi-Fi UI (see VfdColor).
-    var vfdColor: String
+    // Accent ink for the UI (see InkColor). Key name predates the rename.
+    var inkColor: String
         get() = prefs.getString(KEY_VFD_COLOR, null) ?: "CYAN"
         set(value) = prefs.edit { putString(KEY_VFD_COLOR, value) }
 

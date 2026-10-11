@@ -46,30 +46,30 @@ fun SettingsScreen(onBack: () -> Unit) {
     }
     BackHandler(onBack = onBack)
 
-    HifiPage(model = "Setup", title = stringResource(R.string.settings_title), onBack = onBack) {
-        EngravedGroup(stringResource(R.string.settings_section_vfd)) {
+    SubPage(model = "Setup", title = stringResource(R.string.settings_title), onBack = onBack) {
+        Section(stringResource(R.string.settings_section_vfd)) {
             Text(stringResource(R.string.settings_vfd_desc), style = descStyle)
             Spacer(Modifier.height(12.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                VfdColor.entries.forEach { option ->
-                    HwButton(
-                        onClick = { settings.vfdColor = option },
+                InkColor.entries.forEach { option ->
+                    KeyButton(
+                        onClick = { settings.inkColor = option },
                         width = 60.dp,
                         height = 40.dp,
-                        led = settings.vfdColor == option,
-                        ledColor = option.color,
+                        active = settings.inkColor == option,
+                        activeColor = option.color,
                         caption = stringResource(option.labelRes),
                     ) {
                         Box(
                             Modifier
                                 .size(width = 22.dp, height = 8.dp)
-                                .background(option.color.copy(alpha = if (settings.vfdColor == option) 1f else 0.35f)),
+                                .background(option.color.copy(alpha = if (settings.inkColor == option) 1f else 0.35f)),
                         )
                     }
                 }
             }
         }
-        EngravedGroup(stringResource(R.string.settings_section_display)) {
+        Section(stringResource(R.string.settings_section_display)) {
             SwitchRow(stringResource(R.string.settings_keep_screen_on), stringResource(R.string.settings_keep_screen_on_desc), settings.keepScreenOn) {
                 settings.keepScreenOn = it
             }
@@ -82,25 +82,25 @@ fun SettingsScreen(onBack: () -> Unit) {
                 settings.burnInProtection = it
             }
         }
-        EngravedGroup(stringResource(R.string.settings_section_clock)) {
+        Section(stringResource(R.string.settings_section_clock)) {
             SwitchRow(stringResource(R.string.settings_clock_seconds), stringResource(R.string.settings_clock_seconds_desc), settings.clockSeconds) {
                 settings.clockSeconds = it
             }
         }
-        Silk(stringResource(R.string.settings_about, versionName), color = Hifi.SilkscreenDim, modifier = Modifier.align(Alignment.CenterHorizontally))
+        Caption(stringResource(R.string.settings_about, versionName), color = Ink.TextSubtle, modifier = Modifier.align(Alignment.CenterHorizontally))
     }
 }
 
 // ------------------------------------------------------------------ shared page parts
 
-val descStyle = TextStyle(fontFamily = Manrope, fontWeight = FontWeight.Medium, fontSize = 12.sp, color = Color(0xFF7D776E), lineHeight = 16.sp)
-private val titleStyle = TextStyle(fontFamily = Manrope, fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Color(0xFFD8D1C5))
+val descStyle = TextStyle(fontFamily = Manrope, fontWeight = FontWeight.Medium, fontSize = 12.sp, color = Ink.TextMuted, lineHeight = 16.sp)
+private val titleStyle = TextStyle(fontFamily = Manrope, fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Ink.Text)
 
-// Faceplate page for the setup-type screens: a BACK button and the screen
-// name on the brand strip, then engraved groups of controls.
+// ScreenBase page for the setup-type screens: a BACK button and the screen
+// name on the top strip, then titled groups of controls.
 @Composable
-fun HifiPage(model: String, title: String, onBack: () -> Unit, content: @Composable ColumnScope.() -> Unit) {
-    Faceplate(modifier = Modifier.fillMaxSize()) {
+fun SubPage(model: String, title: String, onBack: () -> Unit, content: @Composable ColumnScope.() -> Unit) {
+    ScreenBase(modifier = Modifier.fillMaxSize()) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -110,37 +110,25 @@ fun HifiPage(model: String, title: String, onBack: () -> Unit, content: @Composa
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Column(Modifier.widthIn(max = 720.dp).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(18.dp)) {
-                BrandStrip(model = model) {
-                    HwButton(onClick = onBack, width = 64.dp, height = 34.dp, contentDescription = stringResource(R.string.action_back)) {
+                TopStrip(model = model) {
+                    KeyButton(onClick = onBack, width = 64.dp, height = 34.dp, contentDescription = stringResource(R.string.action_back)) {
                         CapLabel("BACK", 11.sp)
                     }
                 }
-                VfdWindow(Modifier.fillMaxWidth(), contentPadding = 12.dp) {
-                    VfdText(title.uppercase(), 22.sp)
-                }
+                DotText(title.uppercase(), 28.sp, weight = FontWeight.Black)
                 content()
             }
         }
     }
 }
 
-// A group of controls framed by an engraved line on the faceplate, with its
-// name silkscreened into the top edge.
+// A titled group of controls: caption above, flat panel below.
 @Composable
-fun EngravedGroup(label: String, content: @Composable ColumnScope.() -> Unit) {
-    Box {
-        Column(
-            modifier = Modifier
-                .padding(top = 6.dp)
-                .fillMaxWidth()
-                .border(1.dp, Color.Black.copy(alpha = 0.6f), RoundedCornerShape(6.dp))
-                .padding(1.dp)
-                .border(1.dp, Color.White.copy(alpha = 0.04f), RoundedCornerShape(5.dp))
-                .padding(horizontal = 16.dp, vertical = 16.dp),
-            content = content,
-        )
-        Box(Modifier.padding(start = 12.dp).background(Hifi.Faceplate).padding(horizontal = 6.dp)) {
-            Silk(label)
+fun Section(label: String, content: @Composable ColumnScope.() -> Unit) {
+    Column {
+        Caption(label, modifier = Modifier.padding(start = 4.dp, bottom = 8.dp))
+        DisplayPanel(Modifier.fillMaxWidth()) {
+            Column(content = content)
         }
     }
 }
@@ -153,14 +141,14 @@ fun SwitchRow(title: String, description: String?, checked: Boolean, onCheckedCh
             if (description != null) Text(description, style = descStyle)
         }
         Spacer(Modifier.width(16.dp))
-        HwButton(onClick = { onCheckedChange(!checked) }, width = 60.dp, height = 36.dp, led = checked) {
+        KeyButton(onClick = { onCheckedChange(!checked) }, width = 60.dp, height = 36.dp, active = checked) {
             CapLabel(if (checked) "ON" else "OFF", 11.sp)
         }
     }
 }
 
 // Radio-style row: the whole set of options is a strip of buttons and the
-// selected one has its LED lit.
+// selected one is shown active.
 @Composable
 fun ChoiceRow(title: String, description: String?, selected: Boolean, cap: String, onClick: () -> Unit) {
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -169,7 +157,7 @@ fun ChoiceRow(title: String, description: String?, selected: Boolean, cap: Strin
             if (description != null) Text(description, style = descStyle)
         }
         Spacer(Modifier.width(16.dp))
-        HwButton(onClick = onClick, width = 60.dp, height = 36.dp, led = selected) {
+        KeyButton(onClick = onClick, width = 60.dp, height = 36.dp, active = selected) {
             CapLabel(cap, 11.sp)
         }
     }
@@ -178,7 +166,6 @@ fun ChoiceRow(title: String, description: String?, selected: Boolean, cap: Strin
 @Composable
 fun RowDivider() {
     Spacer(Modifier.height(12.dp))
-    Box(Modifier.fillMaxWidth().height(1.dp).background(Color.Black.copy(alpha = 0.5f)))
-    Box(Modifier.fillMaxWidth().height(1.dp).background(Color.White.copy(alpha = 0.03f)))
+    Box(Modifier.fillMaxWidth().height(1.dp).background(Ink.PanelBorder))
     Spacer(Modifier.height(12.dp))
 }

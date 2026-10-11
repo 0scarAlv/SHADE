@@ -89,8 +89,8 @@
 
     <!-- Settings -->
     <string name="settings_title">Ajustes</string>
-    <string name="settings_section_vfd">Color del display</string>
-    <string name="settings_vfd_desc">El color de los dígitos y textos de la pantalla VFD</string>
+    <string name="settings_section_vfd">Color de acento</string>
+    <string name="settings_vfd_desc">El color de los números, textos e indicadores activos</string>
     <string name="vfd_cyan">Cian</string>
     <string name="vfd_amber">Ámbar</string>
     <string name="vfd_red">Rojo</string>

@@ -39,7 +39,7 @@ import com.shade.panel.ui.GestureNavShell
 import com.shade.panel.ui.GestureSettingsScreen
 import com.shade.panel.ui.HomeScreen
 import com.shade.panel.ui.LocalAppSettings
-import com.shade.panel.ui.LocalVfd
+import com.shade.panel.ui.LocalInk
 import com.shade.panel.ui.PanelViewModel
 import com.shade.panel.ui.SettingsScreen
 import com.shade.panel.ui.panelViewModelFactory
@@ -65,7 +65,7 @@ class MainActivity : ComponentActivity() {
             val viewModel: PanelViewModel = viewModel(factory = panelViewModelFactory(context))
             val uiState by viewModel.uiState.collectAsState()
 
-            // The Hi-Fi screens use the fixed VFD color (LocalVfd); the clock
+            // Most screens use the fixed accent ink (LocalInk); the clock
             // keeps its accent from the current cover, animated between
             // palettes so a track change washes the color over.
             val palette = rememberArtPalette(uiState.art)
@@ -83,7 +83,7 @@ class MainActivity : ComponentActivity() {
 
             CompositionLocalProvider(
                 LocalAppSettings provides settings,
-                LocalVfd provides settings.vfdColor.color,
+                LocalInk provides settings.inkColor.color,
             ) {
                 ShadeTheme(accent = accent) {
                     // Without a Surface, LocalContentColor never gets set from the

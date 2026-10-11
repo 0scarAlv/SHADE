@@ -58,12 +58,12 @@ fun BluetoothSettingsScreen(viewModel: PanelViewModel, onBack: () -> Unit) {
         viewModel.restartTransport()
     }
 
-    HifiPage(model = "Link", title = stringResource(R.string.connection_title), onBack = onBack) {
-        VfdWindow(Modifier.fillMaxWidth(), contentPadding = 12.dp) {
+    SubPage(model = "Link", title = stringResource(R.string.connection_title), onBack = onBack) {
+        DisplayPanel(Modifier.fillMaxWidth(), contentPadding = 12.dp) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                VfdText(if (transport == Transport.BLUETOOTH) "BLUETOOTH" else "USB", 16.sp)
+                DotText(if (transport == Transport.BLUETOOTH) "BLUETOOTH" else "USB", 16.sp)
                 Spacer(Modifier.weight(1f))
-                VfdText(
+                DotText(
                     when (uiState.connection) {
                         ConnectionState.CONNECTED -> "LINKED"
                         ConnectionState.CONNECTING -> "SEARCHING"
@@ -75,7 +75,7 @@ fun BluetoothSettingsScreen(viewModel: PanelViewModel, onBack: () -> Unit) {
             }
         }
 
-        EngravedGroup(stringResource(R.string.connection_section_transport)) {
+        Section(stringResource(R.string.connection_section_transport)) {
             ChoiceRow(
                 title = stringResource(R.string.connection_transport_usb),
                 description = stringResource(R.string.connection_transport_usb_desc),
@@ -94,11 +94,11 @@ fun BluetoothSettingsScreen(viewModel: PanelViewModel, onBack: () -> Unit) {
         }
 
         AnimatedVisibility(visible = transport == Transport.BLUETOOTH) {
-            EngravedGroup(stringResource(R.string.connection_paired_devices)) {
+            Section(stringResource(R.string.connection_paired_devices)) {
                 if (!hasPermission) {
                     Text(stringResource(R.string.connection_permission_explainer), style = descStyle)
                     Spacer(Modifier.height(12.dp))
-                    HwButton(
+                    KeyButton(
                         onClick = { permissionLauncher.launch(Manifest.permission.BLUETOOTH_CONNECT) },
                         width = 120.dp,
                         height = 38.dp,

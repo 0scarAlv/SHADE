@@ -58,9 +58,9 @@ import kotlin.math.roundToInt
 // detectors serve different destinations (this one only opens the player).
 private val SWIPE_UP_THRESHOLD = 80.dp
 
-// Home as the unit's front panel in standby: a VFD with the time, link
+// Home as the panel at rest: a display with the time, link
 // status and what's playing, and a row of source-selector buttons below,
-// each with its LED and a silkscreened name plus a one-line readout.
+// each with its status dot, a caption and a one-line readout.
 @Composable
 fun HomeScreen(
     viewModel: PanelViewModel,
@@ -90,7 +90,7 @@ fun HomeScreen(
         }
     }
 
-    Faceplate(modifier = Modifier.fillMaxSize()) {
+    ScreenBase(modifier = Modifier.fillMaxSize()) {
         BoxWithConstraints(
             modifier = Modifier
                 .fillMaxSize()
@@ -106,11 +106,11 @@ fun HomeScreen(
                     .nestedScroll(nestedScrollConnection)
                     .verticalScroll(rememberScrollState()),
             ) {
-                BrandStrip(model = "SP-1 · Standby") {
-                    LedLabel(
+                TopStrip(model = "SP-1 · Standby") {
+                    StatusDot(
                         label = if (uiState.transport == Transport.BLUETOOTH) "BT" else "USB",
                         on = uiState.connection == ConnectionState.CONNECTED,
-                        color = if (uiState.connection == ConnectionState.CONNECTED) LocalVfd.current else Color(0xFFFF4B3E),
+                        color = if (uiState.connection == ConnectionState.CONNECTED) LocalInk.current else Color(0xFFFF4B3E),
                     )
                 }
                 Spacer(Modifier.height(16.dp))
@@ -118,9 +118,9 @@ fun HomeScreen(
                 Spacer(Modifier.height(22.dp))
                 SelectorGrid(selectors, columns = if (landscape) 6 else 3)
                 Spacer(Modifier.height(18.dp))
-                Silk(
+                Caption(
                     stringResource(R.string.home_swipe_hint),
-                    color = Hifi.SilkscreenDim,
+                    color = Ink.TextSubtle,
                     modifier = Modifier.align(Alignment.CenterHorizontally),
                 )
             }
@@ -145,32 +145,32 @@ private fun StandbyDisplay(uiState: PanelUiState, onOpenPlayer: () -> Unit, tall
     val seconds = SimpleDateFormat("ss", locale).format(now)
     val date = SimpleDateFormat("EEE dd MMM", locale).format(now).uppercase(locale).replace(".", "")
 
-    HwPressable(onClick = onOpenPlayer) {
-        VfdWindow(modifier = Modifier.fillMaxWidth().height(if (tall) 190.dp else 150.dp)) {
+    Pressable(onClick = onOpenPlayer) {
+        DisplayPanel(modifier = Modifier.fillMaxWidth().height(if (tall) 190.dp else 150.dp)) {
             Row(Modifier.fillMaxSize(), verticalAlignment = Alignment.CenterVertically) {
                 Column {
                     Row(verticalAlignment = Alignment.Bottom) {
-                        SegmentReadout(time, 54.sp, ghost = "88:88")
+                        Readout(time, 54.sp, template = "88:88")
                         Spacer(Modifier.width(6.dp))
-                        SegmentReadout(seconds, 20.sp, ghost = "88", modifier = Modifier.padding(bottom = 6.dp))
+                        Readout(seconds, 20.sp, template = "88", modifier = Modifier.padding(bottom = 6.dp))
                     }
                     Spacer(Modifier.height(6.dp))
-                    VfdText(date, 15.sp)
+                    DotText(date, 15.sp)
                 }
                 Spacer(Modifier.width(24.dp))
                 Column(Modifier.weight(1f), horizontalAlignment = Alignment.End) {
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        VfdText(if (uiState.playing) "PLAY" else "STOP", 12.sp, lit = uiState.hasTrack)
-                        VfdText("LINK", 12.sp, lit = uiState.connection == ConnectionState.CONNECTED)
+                        DotText(if (uiState.playing) "PLAY" else "STOP", 12.sp, lit = uiState.hasTrack)
+                        DotText("LINK", 12.sp, lit = uiState.connection == ConnectionState.CONNECTED)
                     }
                     Spacer(Modifier.height(14.dp))
-                    VfdText(
+                    DotText(
                         (uiState.title.ifBlank { stringResource(R.string.no_track) }).uppercase(),
                         20.sp,
                         weight = FontWeight.Black,
                         modifier = Modifier.basicMarquee(iterations = Int.MAX_VALUE, initialDelayMillis = 1_500, velocity = 40.dp),
                     )
-                    VfdText(
+                    DotText(
                         uiState.artist.uppercase().ifBlank { " " },
                         14.sp,
                         modifier = Modifier.basicMarquee(iterations = Int.MAX_VALUE, initialDelayMillis = 2_500, velocity = 30.dp),
@@ -187,9 +187,9 @@ private fun StandbyDisplay(uiState: PanelUiState, onOpenPlayer: () -> Unit, tall
     }
 }
 
-// Lets a whole VFD window act as one big button without drawing a cap.
+// Lets a whole display panel act as one big button.
 @Composable
-private fun HwPressable(onClick: () -> Unit, content: @Composable () -> Unit) {
+private fun Pressable(onClick: () -> Unit, content: @Composable () -> Unit) {
     val haptics = LocalHapticFeedback.current
     Box(
         Modifier.clickableNoRipple {
@@ -204,7 +204,7 @@ private data class SelectorModel(
     val cap: String,
     val readout: String,
     val led: Boolean,
-    val ledColor: Color?,
+    val activeColor: Color?,
     val onClick: () -> Unit,
 )
 
@@ -246,17 +246,17 @@ private fun ColumnScope.SelectorGrid(selectors: List<SelectorModel>, columns: In
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             row.forEach { model ->
                 BoxWithConstraints(Modifier.weight(1f)) {
-                    HwButton(
+                    KeyButton(
                         onClick = model.onClick,
                         width = maxWidth,
                         height = 64.dp,
-                        led = model.led,
-                        ledColor = model.ledColor ?: LocalVfd.current,
+                        active = model.led,
+                        activeColor = model.activeColor ?: LocalInk.current,
                         caption = model.caption,
                     ) {
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
                             CapLabel(model.cap, 15.sp)
-                            Silk(model.readout, color = Hifi.SilkscreenDim, size = 8.sp)
+                            Caption(model.readout, color = Ink.TextSubtle, size = 8.sp)
                         }
                     }
                 }

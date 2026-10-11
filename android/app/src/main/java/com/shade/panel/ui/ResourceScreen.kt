@@ -43,8 +43,8 @@ import kotlin.math.roundToInt
 private val WarnColor = Color(0xFFFFB13B)
 private val AlertColor = Color(0xFFFF4B3E)
 
-// "System monitor" component: four VFD windows (CPU, memory, network,
-// disk), each with a seven-segment readout, a segmented level bar and a
+// System monitor: four display panels (CPU, memory, network, disk),
+// each with a large readout, a segmented level bar and a
 // dot-matrix history of the last minute. Sized to fill the screen without
 // scrolling, so vertical swipes stay free for the gesture shell. History
 // lives in the ViewModel, so it's already populated when you arrive.
@@ -54,22 +54,22 @@ fun ResourceScreen(viewModel: PanelViewModel) {
     val history by viewModel.resourceHistory.collectAsState()
     val resource = uiState.resource
 
-    Faceplate(modifier = Modifier.fillMaxSize()) {
+    ScreenBase(modifier = Modifier.fillMaxSize()) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .windowInsetsPadding(WindowInsets.safeDrawing)
                 .padding(horizontal = 24.dp, vertical = 18.dp),
         ) {
-            BrandStrip(model = "SM-1 · System monitor", modifier = Modifier.fillMaxWidth().padding(end = 56.dp)) {
+            TopStrip(model = "SM-1 · System monitor", modifier = Modifier.fillMaxWidth().padding(end = 56.dp)) {
                 if (resource != null && resource.hasBattery) {
                     val percent = resource.batteryPercent ?: 0
-                    LedLabel(
+                    StatusDot(
                         label = "BAT $percent%",
                         on = true,
                         color = when {
-                            resource.batteryCharging == true -> LocalVfd.current
-                            percent >= 50 -> LocalVfd.current
+                            resource.batteryCharging == true -> LocalInk.current
+                            percent >= 50 -> LocalInk.current
                             percent >= 20 -> WarnColor
                             else -> AlertColor
                         },
@@ -79,9 +79,9 @@ fun ResourceScreen(viewModel: PanelViewModel) {
             Spacer(Modifier.height(14.dp))
 
             if (resource == null) {
-                VfdWindow(Modifier.fillMaxSize()) {
+                DisplayPanel(Modifier.fillMaxSize()) {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        VfdText(stringResource(R.string.resource_waiting).uppercase(), 18.sp)
+                        DotText(stringResource(R.string.resource_waiting).uppercase(), 18.sp)
                     }
                 }
             } else {
@@ -89,7 +89,7 @@ fun ResourceScreen(viewModel: PanelViewModel) {
                     (resource.ramUsedBytes.toFloat() / resource.ramTotalBytes.toFloat()).coerceIn(0f, 1f)
                 } else 0f
                 val cpuFraction = (resource.cpuUsagePercent.toFloat() / 100f).coerceIn(0f, 1f)
-                val vfd = LocalVfd.current
+                val ink = LocalInk.current
                 val diskTotal = history.diskRead.zip(history.diskWrite) { r, w -> r + w }
 
                 Row(Modifier.fillMaxWidth().weight(1f), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -98,7 +98,7 @@ fun ResourceScreen(viewModel: PanelViewModel) {
                         readout = "${resource.cpuUsagePercent.roundToInt()}",
                         detail = stringResource(R.string.resource_tap_for_processes),
                         level = cpuFraction,
-                        levelColor = levelColor(cpuFraction, vfd),
+                        levelColor = levelColor(cpuFraction, ink),
                         history = history.cpu,
                         onClick = { viewModel.requestProcesses("cpu") },
                         modifier = Modifier.weight(1f).fillMaxHeight(),
@@ -108,7 +108,7 @@ fun ResourceScreen(viewModel: PanelViewModel) {
                         readout = "${(ramFraction * 100).roundToInt()}",
                         detail = "%.1f / %.1f GB".format(resource.ramUsedBytes / GB, resource.ramTotalBytes / GB),
                         level = ramFraction,
-                        levelColor = levelColor(ramFraction, vfd),
+                        levelColor = levelColor(ramFraction, ink),
                         history = history.ram,
                         onClick = { viewModel.requestProcesses("ram") },
                         modifier = Modifier.weight(1f).fillMaxHeight(),
@@ -166,19 +166,19 @@ private fun MeterWindow(
     onClick: () -> Unit,
     modifier: Modifier,
 ) {
-    VfdWindow(modifier = modifier.clickableNoRipple(onClick)) {
+    DisplayPanel(modifier = modifier.clickableNoRipple(onClick)) {
         Column(Modifier.fillMaxSize()) {
             Row(verticalAlignment = Alignment.Bottom) {
-                VfdText(label, 14.sp)
+                DotText(label, 14.sp)
                 Spacer(Modifier.weight(1f))
-                SegmentReadout(readout, 34.sp, ghost = "888")
+                Readout(readout, 34.sp, template = "888")
                 Spacer(Modifier.width(4.dp))
-                VfdText("%", 16.sp, modifier = Modifier.padding(bottom = 4.dp))
+                DotText("%", 16.sp, modifier = Modifier.padding(bottom = 4.dp))
             }
             Spacer(Modifier.height(8.dp))
             SegmentBar(level, segments = 30, color = levelColor, modifier = Modifier.fillMaxWidth().height(8.dp))
             Spacer(Modifier.height(6.dp))
-            VfdText(detail.uppercase(), 11.sp, weight = FontWeight.Medium)
+            DotText(detail.uppercase(), 11.sp, weight = FontWeight.Medium)
             Spacer(Modifier.height(8.dp))
             DotHistory(history, 1f, modifier = Modifier.fillMaxWidth().weight(1f))
         }
@@ -196,9 +196,9 @@ private fun ThroughputWindow(
     historyMax: Float,
     modifier: Modifier,
 ) {
-    VfdWindow(modifier = modifier) {
+    DisplayPanel(modifier = modifier) {
         Column(Modifier.fillMaxSize()) {
-            VfdText(label, 14.sp)
+            DotText(label, 14.sp)
             Spacer(Modifier.height(6.dp))
             RateLine(topTag, top)
             RateLine(bottomTag, bottom)
@@ -212,21 +212,21 @@ private fun ThroughputWindow(
 private fun RateLine(tag: String, bytesPerSec: Double) {
     val (value, unit) = splitRate(bytesPerSec)
     Row(verticalAlignment = Alignment.Bottom) {
-        VfdText(tag, 12.sp, weight = FontWeight.Medium, lit = false)
+        DotText(tag, 12.sp, weight = FontWeight.Medium, lit = false)
         Spacer(Modifier.weight(1f))
-        SegmentReadout(value, 22.sp, ghost = "888.8")
+        Readout(value, 22.sp, template = "888.8")
         Spacer(Modifier.width(6.dp))
-        VfdText(unit, 12.sp, modifier = Modifier.padding(bottom = 2.dp))
+        DotText(unit, 12.sp, modifier = Modifier.padding(bottom = 2.dp))
     }
 }
 
-// Value + unit split so the number can sit on the seven-segment readout,
+// Value + unit split so the number can sit on the large readout,
 // always as a fixed "###.#" so the digits never shift sideways.
 private fun splitRate(bytesPerSec: Double): Pair<String, String> {
     val kb = bytesPerSec / 1024.0
     val mb = kb / 1024.0
     val (value, unit) = if (mb >= 1) mb to "MB/S" else kb to "KB/S"
-    return "%5.1f".format(java.util.Locale.US, value.coerceAtMost(999.9)).replace(' ', '!') to unit
+    return "%.1f".format(java.util.Locale.US, value.coerceAtMost(999.9)) to unit
 }
 
 // Network/disk throughput has no natural 100% ceiling like RAM/CPU do, so
@@ -239,7 +239,7 @@ private fun autoScaleMax(vararg histories: List<Float>): Float {
     return (peak * 1.15f).coerceAtLeast(256f * 1024f)
 }
 
-// Scrim + a VFD window listing the top processes for whichever meter was
+// Scrim + a panel listing the top processes for whichever meter was
 // tapped. entries == null means the reply hasn't arrived yet.
 @Composable
 private fun ProcessOverlay(metric: String, entries: List<ProcessEntry>?, onRefresh: () -> Unit, onDismiss: () -> Unit) {
@@ -250,8 +250,8 @@ private fun ProcessOverlay(metric: String, entries: List<ProcessEntry>?, onRefre
             .clickableNoRipple(onDismiss),
         contentAlignment = Alignment.Center,
     ) {
-        Faceplate(
-            screws = false,
+        DisplayPanel(
+            contentPadding = 0.dp,
             modifier = Modifier
                 .padding(24.dp)
                 .widthIn(max = 460.dp)
@@ -261,19 +261,19 @@ private fun ProcessOverlay(metric: String, entries: List<ProcessEntry>?, onRefre
         ) {
             Column(Modifier.padding(16.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Silk(stringResource(if (metric == "cpu") R.string.resource_top_cpu else R.string.resource_top_ram), modifier = Modifier.weight(1f))
-                    HwButton(onClick = onRefresh, width = 56.dp, height = 32.dp, contentDescription = stringResource(R.string.action_refresh)) {
+                    Caption(stringResource(if (metric == "cpu") R.string.resource_top_cpu else R.string.resource_top_ram), modifier = Modifier.weight(1f))
+                    KeyButton(onClick = onRefresh, width = 56.dp, height = 32.dp, contentDescription = stringResource(R.string.action_refresh)) {
                         CapLabel("RFSH", 10.sp)
                     }
                     Spacer(Modifier.width(8.dp))
-                    HwButton(onClick = onDismiss, width = 56.dp, height = 32.dp, contentDescription = stringResource(R.string.action_close)) {
+                    KeyButton(onClick = onDismiss, width = 56.dp, height = 32.dp, contentDescription = stringResource(R.string.action_close)) {
                         CapLabel("CLOSE", 10.sp)
                     }
                 }
                 Spacer(Modifier.height(12.dp))
-                VfdWindow(Modifier.fillMaxWidth()) {
+                DisplayPanel(Modifier.fillMaxWidth()) {
                     if (entries == null) {
-                        VfdText("LOADING", 16.sp)
+                        DotText("LOADING", 16.sp)
                     } else {
                         val peak = entries.maxOfOrNull { if (metric == "cpu") it.cpuPercent else it.ramBytes.toDouble() } ?: 0.0
                         LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -281,10 +281,10 @@ private fun ProcessOverlay(metric: String, entries: List<ProcessEntry>?, onRefre
                                 val raw = if (metric == "cpu") entry.cpuPercent else entry.ramBytes.toDouble()
                                 Column {
                                     Row(verticalAlignment = Alignment.CenterVertically) {
-                                        VfdText("%02d".format(index + 1), 12.sp, lit = false)
+                                        DotText("%02d".format(index + 1), 12.sp, lit = false)
                                         Spacer(Modifier.width(8.dp))
-                                        VfdText(entry.name.uppercase(), 14.sp, modifier = Modifier.weight(1f))
-                                        VfdText(
+                                        DotText(entry.name.uppercase(), 14.sp, modifier = Modifier.weight(1f))
+                                        DotText(
                                             if (metric == "cpu") "%.1f%%".format(entry.cpuPercent) else formatBytes(entry.ramBytes).uppercase(),
                                             13.sp,
                                         )

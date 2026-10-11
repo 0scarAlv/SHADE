@@ -59,10 +59,10 @@ import com.shade.panel.data.ConnectionState
 import com.shade.panel.data.LyricsLine
 import com.shade.panel.data.Transport
 
-// The player as a stereo component: cover art in a recessed bezel, a VFD
-// window carrying source/state indicators, a seven-segment elapsed time,
-// dot-matrix title/artist, a segmented seek bar and the spectrum display,
-// then a deck of physical transport buttons and a rotary volume knob.
+// Player laid out like an audio component, rendered flat: cover art, a
+// display panel with source/state annunciators, a large elapsed-time
+// readout, dot-matrix title/artist, a segmented seek bar and the spectrum,
+// then a row of transport keys and the volume dial.
 @Composable
 fun PanelScreen(viewModel: PanelViewModel) {
     val uiState by viewModel.uiState.collectAsState()
@@ -70,7 +70,7 @@ fun PanelScreen(viewModel: PanelViewModel) {
     val burnIn = rememberBurnInOffset(settings.burnInProtection, maxShift = 3.dp)
     var lyricsVisible by remember { mutableStateOf(false) }
 
-    Faceplate(modifier = Modifier.fillMaxSize()) {
+    ScreenBase(modifier = Modifier.fillMaxSize()) {
         BoxWithConstraints(
             modifier = Modifier
                 .fillMaxSize()
@@ -80,10 +80,10 @@ fun PanelScreen(viewModel: PanelViewModel) {
         ) {
             val landscape = maxWidth > maxHeight
             val strip = @Composable {
-                BrandStrip(
+                TopStrip(
                     model = "SP-1 · Digital media panel",
                     modifier = Modifier.fillMaxWidth().padding(end = 56.dp),
-                ) { StatusLeds(uiState) }
+                ) { StatusDots(uiState) }
             }
             val toggleLyrics = { lyricsVisible = !lyricsVisible }
 
@@ -95,7 +95,7 @@ fun PanelScreen(viewModel: PanelViewModel) {
                     strip()
                     Spacer(Modifier.height(12.dp))
                     Row(Modifier.fillMaxWidth().height(mainHeight), verticalAlignment = Alignment.CenterVertically) {
-                        ArtBezel(uiState.art, artSize, onDoubleTap = toggleLyrics)
+                        ArtFrame(uiState.art, artSize, onDoubleTap = toggleLyrics)
                         Spacer(Modifier.width(16.dp))
                         PlayerDisplay(uiState, viewModel, lyricsVisible, Modifier.weight(1f).fillMaxHeight())
                         Spacer(Modifier.width(16.dp))
@@ -109,7 +109,7 @@ fun PanelScreen(viewModel: PanelViewModel) {
                 Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally) {
                     strip()
                     Spacer(Modifier.height(14.dp))
-                    ArtBezel(uiState.art, artSize, onDoubleTap = toggleLyrics)
+                    ArtFrame(uiState.art, artSize, onDoubleTap = toggleLyrics)
                     Spacer(Modifier.height(14.dp))
                     PlayerDisplay(uiState, viewModel, lyricsVisible, Modifier.fillMaxWidth().weight(1f))
                     Spacer(Modifier.height(16.dp))
@@ -125,32 +125,28 @@ fun PanelScreen(viewModel: PanelViewModel) {
 }
 
 @Composable
-private fun StatusLeds(uiState: PanelUiState) {
+private fun StatusDots(uiState: PanelUiState) {
     Row(horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.CenterVertically) {
-        LedLabel(
+        StatusDot(
             label = if (uiState.transport == Transport.BLUETOOTH) "BT" else "USB",
             on = uiState.connection == ConnectionState.CONNECTED,
             color = when (uiState.connection) {
-                ConnectionState.CONNECTED -> LocalVfd.current
+                ConnectionState.CONNECTED -> LocalInk.current
                 ConnectionState.CONNECTING -> Color(0xFFFFB13B)
                 ConnectionState.DISCONNECTED -> Color(0xFFFF4B3E)
             },
         )
-        LedLabel("Play", on = uiState.playing)
+        StatusDot("Play", on = uiState.playing)
     }
 }
 
-// Cover art seated in a black bezel with a thin inner lip, like the window
-// of a cassette deck. Double-tap still toggles lyrics.
+// Cover art, plain and rounded. Double-tap toggles lyrics.
 @Composable
-private fun ArtBezel(art: Any?, artSize: Dp, onDoubleTap: () -> Unit) {
+private fun ArtFrame(art: Any?, artSize: Dp, onDoubleTap: () -> Unit) {
     val haptics = LocalHapticFeedback.current
     Box(
         modifier = Modifier
             .size(artSize)
-            .clip(RoundedCornerShape(6.dp))
-            .background(Hifi.Bezel)
-            .padding(4.dp)
             .pointerInput(Unit) {
                 detectTapGestures(onDoubleTap = {
                     haptics.performHapticFeedback(HapticFeedbackType.ContextClick)
@@ -159,45 +155,28 @@ private fun ArtBezel(art: Any?, artSize: Dp, onDoubleTap: () -> Unit) {
             },
     ) {
         Crossfade(targetState = art, animationSpec = tween(500), label = "art") { model ->
-            ArtImage(
-                model = model,
-                shape = RoundedCornerShape(3.dp),
-                modifier = Modifier
-                    .fillMaxSize()
-                    .drawWithContent {
-                        drawContent()
-                        // Faint glass reflection over the cover.
-                        drawRect(
-                            androidx.compose.ui.graphics.Brush.linearGradient(
-                                0f to Color.White.copy(alpha = 0.08f),
-                                0.4f to Color.Transparent,
-                                start = Offset.Zero,
-                                end = Offset(size.width, size.height),
-                            ),
-                        )
-                    },
-            )
+            ArtImage(model = model, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxSize())
         }
     }
 }
 
 @Composable
 private fun PlayerDisplay(uiState: PanelUiState, viewModel: PanelViewModel, lyricsVisible: Boolean, modifier: Modifier) {
-    VfdWindow(modifier = modifier) {
+    DisplayPanel(modifier = modifier) {
         Column(Modifier.fillMaxSize()) {
             // Indicator row: source, transport state, mode annunciators.
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                VfdText("SRC", 11.sp, weight = FontWeight.Medium)
-                VfdText(
+                DotText("SRC", 11.sp, weight = FontWeight.Medium)
+                DotText(
                     (uiState.appName ?: if (uiState.connection == ConnectionState.CONNECTED) "PC" else "----").uppercase(),
                     13.sp,
                     modifier = Modifier.weight(1f, fill = false),
                 )
                 Spacer(Modifier.weight(1f))
-                VfdText(if (uiState.playing) "PLAY" else "PAUSE", 12.sp, lit = uiState.hasTrack)
-                VfdText("SHUF", 11.sp, lit = uiState.shuffle == true)
-                VfdText(if (uiState.repeat == "track") "RPT 1" else "RPT", 11.sp, lit = uiState.repeat != null && uiState.repeat != "none")
-                VfdText("MUTE", 11.sp, lit = uiState.muted)
+                DotText(if (uiState.playing) "PLAY" else "PAUSE", 12.sp, lit = uiState.hasTrack)
+                DotText("SHUF", 11.sp, lit = uiState.shuffle == true)
+                DotText(if (uiState.repeat == "track") "RPT 1" else "RPT", 11.sp, lit = uiState.repeat != null && uiState.repeat != "none")
+                DotText("MUTE", 11.sp, lit = uiState.muted)
             }
             Spacer(Modifier.height(10.dp))
 
@@ -205,7 +184,7 @@ private fun PlayerDisplay(uiState: PanelUiState, viewModel: PanelViewModel, lyri
                 LyricsReadout(uiState.lyricsLines, uiState.currentLyricsIndex, Modifier.fillMaxWidth().weight(1f))
             } else {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    SegmentReadout(text = formatClock(uiState.positionMs), size = 40.sp, ghost = "88:88", lit = uiState.hasTrack)
+                    Readout(text = formatClock(uiState.positionMs), size = 40.sp, template = "88:88", lit = uiState.hasTrack)
                     Spacer(Modifier.width(18.dp))
                     Column(Modifier.weight(1f)) {
                         val title = uiState.title.ifBlank {
@@ -217,16 +196,16 @@ private fun PlayerDisplay(uiState: PanelUiState, viewModel: PanelViewModel, lyri
                                 (fadeIn(tween(300)) + slideInVertically(tween(300)) { it / 3 })
                                     .togetherWith(fadeOut(tween(150)))
                             },
-                            label = "vfdTitle",
+                            label = "displayTitle",
                         ) { (shownTitle, shownArtist) ->
                             Column {
-                                VfdText(
+                                DotText(
                                     shownTitle,
                                     24.sp,
                                     weight = FontWeight.Black,
                                     modifier = Modifier.basicMarquee(iterations = Int.MAX_VALUE, initialDelayMillis = 2_000, velocity = 40.dp),
                                 )
-                                VfdText(
+                                DotText(
                                     shownArtist.ifBlank { " " },
                                     15.sp,
                                     weight = FontWeight.Bold,
@@ -246,24 +225,24 @@ private fun PlayerDisplay(uiState: PanelUiState, viewModel: PanelViewModel, lyri
                 )
                 Spacer(Modifier.height(4.dp))
                 Row(Modifier.fillMaxWidth()) {
-                    VfdText("TIME", 10.sp, weight = FontWeight.Medium, lit = false)
+                    DotText("TIME", 10.sp, weight = FontWeight.Medium, lit = false)
                     Spacer(Modifier.weight(1f))
-                    VfdText(if (duration > 0) "-" + formatClock(duration - uiState.positionMs) else "--:--", 11.sp, weight = FontWeight.Medium)
+                    DotText(if (duration > 0) "-" + formatClock(duration - uiState.positionMs) else "--:--", 11.sp, weight = FontWeight.Medium)
                 }
                 Spacer(Modifier.height(8.dp))
-                SegmentSpectrum(viewModel.spectrum, modifier = Modifier.fillMaxWidth().weight(1f))
+                BarSpectrum(viewModel.spectrum, modifier = Modifier.fillMaxWidth().weight(1f))
             }
         }
     }
 }
 
-// Karaoke on the VFD: previous line dim above, current line bright and
+// Karaoke on the display: previous line dim above, current line bright and
 // large, next line dim below — the whole block rolls up on each change.
 @Composable
 private fun LyricsReadout(lines: List<LyricsLine>, currentIndex: Int, modifier: Modifier) {
     Box(modifier = modifier, contentAlignment = Alignment.Center) {
         if (lines.isEmpty()) {
-            VfdText(stringResource(R.string.no_lyrics_available).uppercase(), 18.sp)
+            DotText(stringResource(R.string.no_lyrics_available).uppercase(), 18.sp)
             return@Box
         }
         val index = currentIndex.coerceIn(-1, lines.lastIndex)
@@ -276,16 +255,16 @@ private fun LyricsReadout(lines: List<LyricsLine>, currentIndex: Int, modifier: 
             label = "lyricsLine",
         ) { i ->
             Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
-                VfdText(lines.getOrNull(i - 1)?.text.orEmpty().ifBlank { " " }, 14.sp, lit = false, maxLines = 1)
+                DotText(lines.getOrNull(i - 1)?.text.orEmpty().ifBlank { " " }, 14.sp, lit = false, maxLines = 1)
                 Spacer(Modifier.height(6.dp))
-                VfdText(
+                DotText(
                     (lines.getOrNull(i)?.text ?: "♪").ifBlank { "♪" },
                     24.sp,
                     weight = FontWeight.Black,
                     maxLines = 2,
                 )
                 Spacer(Modifier.height(6.dp))
-                VfdText(lines.getOrNull(i + 1)?.text.orEmpty().ifBlank { " " }, 14.sp, lit = false, maxLines = 1)
+                DotText(lines.getOrNull(i + 1)?.text.orEmpty().ifBlank { " " }, 14.sp, lit = false, maxLines = 1)
             }
         }
     }
@@ -302,34 +281,34 @@ private fun TransportDeck(
     val settings = LocalAppSettings.current
     Row(modifier = modifier, horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.Top) {
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            HwButton(onClick = viewModel::prev, caption = "Prev", contentDescription = stringResource(R.string.action_previous)) {
+            KeyButton(onClick = viewModel::prev, caption = "Prev", contentDescription = stringResource(R.string.action_previous)) {
                 TransportGlyph(Glyph.PREV)
             }
-            HwButton(
+            KeyButton(
                 onClick = viewModel::playPause,
                 width = 84.dp,
-                led = uiState.playing,
+                active = uiState.playing,
                 caption = "Play/Pause",
                 contentDescription = stringResource(R.string.action_play_pause),
             ) { TransportGlyph(Glyph.PLAY_PAUSE) }
-            HwButton(onClick = viewModel::next, caption = "Next", contentDescription = stringResource(R.string.action_next)) {
+            KeyButton(onClick = viewModel::next, caption = "Next", contentDescription = stringResource(R.string.action_next)) {
                 TransportGlyph(Glyph.NEXT)
             }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             if (uiState.shuffle != null) {
-                HwButton(onClick = viewModel::toggleShuffle, width = 52.dp, led = uiState.shuffle, caption = "Shuffle") { CapLabel("SHF", 11.sp) }
+                KeyButton(onClick = viewModel::toggleShuffle, width = 52.dp, active = uiState.shuffle, caption = "Shuffle") { CapLabel("SHF", 11.sp) }
             }
             if (uiState.repeat != null) {
-                HwButton(onClick = viewModel::cycleRepeat, width = 52.dp, led = uiState.repeat != "none", caption = "Repeat") {
+                KeyButton(onClick = viewModel::cycleRepeat, width = 52.dp, active = uiState.repeat != "none", caption = "Repeat") {
                     CapLabel(if (uiState.repeat == "track") "RPT1" else "RPT", 11.sp)
                 }
             }
-            HwButton(onClick = onToggleLyrics, width = 52.dp, led = lyricsVisible, caption = "Lyric") { CapLabel("TXT", 11.sp) }
-            HwButton(
+            KeyButton(onClick = onToggleLyrics, width = 52.dp, active = lyricsVisible, caption = "Lyric") { CapLabel("TXT", 11.sp) }
+            KeyButton(
                 onClick = { settings.keepScreenOn = !settings.keepScreenOn },
                 width = 52.dp,
-                led = settings.keepScreenOn,
+                active = settings.keepScreenOn,
                 caption = "Hold",
                 contentDescription = stringResource(R.string.action_keep_screen_on),
             ) { CapLabel("DSP", 11.sp) }
@@ -349,40 +328,31 @@ private fun KnobColumn(uiState: PanelUiState, viewModel: PanelViewModel, knobSiz
             size = knobSize,
         )
     }
-    val readout = @Composable {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Silk("Volume")
-            Spacer(Modifier.height(4.dp))
-            VfdWindow(contentPadding = 6.dp) {
-                SegmentReadout(volume?.let { "${(it * 100).toInt()}" } ?: "--", 18.sp, ghost = "888", lit = !uiState.muted)
-            }
-            Spacer(Modifier.height(8.dp))
-            HwButton(onClick = viewModel::toggleMute, width = 56.dp, height = 34.dp, led = uiState.muted, ledColor = Color(0xFFFF4B3E), caption = "Mute") {
-                CapLabel("MUTE", 10.sp)
-            }
+    val mute = @Composable {
+        KeyButton(onClick = viewModel::toggleMute, width = 64.dp, height = 36.dp, active = uiState.muted, caption = "Mute") {
+            CapLabel("MUTE", 10.sp)
         }
     }
     if (horizontal) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(20.dp)) {
             knob()
-            readout()
+            mute()
         }
     } else {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             knob()
-            Spacer(Modifier.height(4.dp))
-            readout()
+            Spacer(Modifier.height(10.dp))
+            mute()
         }
     }
 }
 
 private enum class Glyph { PREV, NEXT, PLAY_PAUSE }
 
-// Transport symbols drawn as plain geometry in silkscreen color, the way
-// they're printed on real deck buttons.
+// Transport symbols drawn as plain geometry rather than icon-font glyphs.
 @Composable
 private fun TransportGlyph(glyph: Glyph) {
-    val color = Color(0xFFCFC8BC)
+    val color = Ink.Text
     Canvas(Modifier.size(width = if (glyph == Glyph.PLAY_PAUSE) 34.dp else 24.dp, height = 14.dp)) {
         val h = size.height
         fun triangle(x: Float, w: Float, pointRight: Boolean) {
@@ -419,11 +389,10 @@ private fun TransportGlyph(glyph: Glyph) {
     }
 }
 
-// "mm:ss" with minutes space-padded (DSEG's "!" blank), so the readout
-// sits right-aligned over its "88:88" ghost.
+// "m:ss"; the readout right-aligns it inside an "88:88"-wide field.
 private fun formatClock(ms: Long): String {
     val totalSeconds = (ms / 1000).coerceAtLeast(0)
     val minutes = (totalSeconds / 60).coerceAtMost(99)
     val seconds = totalSeconds % 60
-    return "%2d:%02d".format(minutes, seconds).replace(' ', '!')
+    return "%d:%02d".format(minutes, seconds)
 }

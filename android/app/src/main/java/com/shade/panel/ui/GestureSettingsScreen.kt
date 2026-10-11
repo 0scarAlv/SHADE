@@ -33,7 +33,7 @@ fun GestureSettingsScreen(onBack: () -> Unit) {
     var up by remember { mutableStateOf(preferences.swipeUp) }
     var down by remember { mutableStateOf(preferences.swipeDown) }
 
-    HifiPage(model = "Gesture", title = stringResource(R.string.gesture_settings_title), onBack = onBack) {
+    SubPage(model = "Gesture", title = stringResource(R.string.gesture_settings_title), onBack = onBack) {
         DirectionGroup("→  " + stringResource(R.string.gesture_direction_right), right) { right = it; preferences.swipeRight = it }
         DirectionGroup("←  " + stringResource(R.string.gesture_direction_left), left) { left = it; preferences.swipeLeft = it }
         DirectionGroup("↑  " + stringResource(R.string.gesture_direction_up), up) { up = it; preferences.swipeUp = it }
@@ -41,11 +41,11 @@ fun GestureSettingsScreen(onBack: () -> Unit) {
     }
 }
 
-// One engraved group per swipe direction with a strip of destination
-// buttons; the selected destination's LED is lit.
+// One group per swipe direction with a strip of destination keys; the
+// selected destination is the active one.
 @Composable
 private fun DirectionGroup(label: String, selected: NavScreen?, onSelect: (NavScreen?) -> Unit) {
-    EngravedGroup(label) {
+    Section(label) {
         Row(
             modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -62,7 +62,7 @@ private fun DirectionGroup(label: String, selected: NavScreen?, onSelect: (NavSc
 
 @Composable
 private fun Target(cap: String, caption: String, selected: Boolean, onClick: () -> Unit) {
-    HwButton(onClick = onClick, width = 64.dp, height = 40.dp, led = selected, caption = caption) {
+    KeyButton(onClick = onClick, width = 64.dp, height = 40.dp, active = selected, caption = caption) {
         CapLabel(cap, 11.sp)
     }
 }

@@ -145,7 +145,7 @@ fun GestureNavShell(viewModel: PanelViewModel, initialScreen: NavScreen, onExit:
                 .windowInsetsPadding(WindowInsets.safeDrawing)
                 .padding(top = 14.dp, end = 14.dp),
         ) {
-            HwButton(onClick = onExit, width = 56.dp, height = 32.dp, contentDescription = stringResource(R.string.action_home)) {
+            KeyButton(onClick = onExit, width = 56.dp, height = 32.dp, contentDescription = stringResource(R.string.action_home)) {
                 CapLabel("HOME", 10.sp)
             }
         }
@@ -172,7 +172,7 @@ private fun PageIndicator(current: NavScreen, trigger: Int, modifier: Modifier =
         delay(1_600)
         visible = false
     }
-    // A row of labeled LEDs, like a source indicator on a receiver.
+    // A row of labeled status dots naming the three panel screens.
     AnimatedVisibility(visible = visible, enter = fadeIn(tween(150)), exit = fadeOut(tween(500)), modifier = modifier) {
         Row(
             modifier = Modifier
@@ -182,7 +182,7 @@ private fun PageIndicator(current: NavScreen, trigger: Int, modifier: Modifier =
             verticalAlignment = Alignment.CenterVertically,
         ) {
             PANEL_SCREENS.forEach { screen ->
-                LedLabel(stringResource(screen.labelRes()), on = screen == current)
+                StatusDot(stringResource(screen.labelRes()), on = screen == current)
             }
         }
     }
