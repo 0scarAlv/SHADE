@@ -90,12 +90,16 @@
     <!-- Settings -->
     <string name="settings_title">Ajustes</string>
     <string name="settings_section_vfd">Color de acento</string>
-    <string name="settings_vfd_desc">El color de los números, textos e indicadores activos</string>
+    <string name="settings_vfd_desc">El color de los números, textos e indicadores activos. «Carátula» lo toma del álbum que suena</string>
+    <string name="vfd_auto">Carátula</string>
     <string name="vfd_cyan">Cian</string>
     <string name="vfd_amber">Ámbar</string>
     <string name="vfd_red">Rojo</string>
     <string name="vfd_green">Verde</string>
     <string name="vfd_ice">Hielo</string>
+    <string name="settings_section_lyrics">Letra</string>
+    <string name="settings_lyrics_offset">Desfase de la letra</string>
+    <string name="settings_lyrics_offset_desc">En segundos. Positivo adelanta las líneas si van tarde respecto al audio</string>
     <string name="settings_section_display">Pantalla</string>
     <string name="settings_keep_screen_on">Mantener encendida</string>
     <string name="settings_keep_screen_on_desc">La pantalla no se apaga mientras Shade está abierto</string>

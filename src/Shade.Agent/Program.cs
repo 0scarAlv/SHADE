@@ -4,6 +4,7 @@ using Shade.Agent.Bluetooth;
 using Shade.Agent.Dashboard;
 using Shade.Agent.Lyrics;
 using Shade.Agent.Metadata;
+using Shade.Agent.Players;
 using Shade.Agent.Protocol;
 using Shade.Agent.Smtc;
 using Shade.Agent.Streaming;
@@ -25,6 +26,9 @@ builder.Services.AddSingleton<ConsoleDashboard>();
 if (dashboardEnabled) builder.Services.AddHostedService(sp => sp.GetRequiredService<ConsoleDashboard>());
 
 builder.Services.AddSingleton<SmtcSessionWatcher>();
+builder.Services.AddSingleton<TauonBridge>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<TauonBridge>());
+builder.Services.AddSingleton<PlaybackRouter>();
 builder.Services.AddSingleton<ArtCache>();
 builder.Services.AddSingleton<ClientHub>();
 builder.Services.AddSingleton<SystemVolumeController>();
@@ -41,6 +45,10 @@ builder.Services.AddHostedService(sp => sp.GetRequiredService<ResourceMonitorSer
 var app = builder.Build();
 
 var smtc = app.Services.GetRequiredService<SmtcSessionWatcher>();
+var tauon = app.Services.GetRequiredService<TauonBridge>();
+// Single stream of "what's playing" from SMTC or the Tauon API, whichever
+// is the active source — everything below listens to this, not to SMTC.
+var player = app.Services.GetRequiredService<PlaybackRouter>();
 var artCache = app.Services.GetRequiredService<ArtCache>();
 var clientHub = app.Services.GetRequiredService<ClientHub>();
 var volumeController = app.Services.GetRequiredService<SystemVolumeController>();
@@ -58,7 +66,7 @@ ResourceMessage? currentResource = null;
 // TrackMetadataProvider) — what clients are actually shown.
 TrackInfo? currentTrack = null;
 
-smtc.TrackChanged += track =>
+player.TrackChanged += track =>
 {
     // SMTC re-fires for the same song with the same sparse data; reapply
     // what an earlier lookup found so the art/album don't flicker away.
@@ -66,7 +74,10 @@ smtc.TrackChanged += track =>
         track = TrackMetadataProvider.Apply(track, known);
     PublishTrack(track);
 
-    var key = TrackMetadataProvider.KeyOf(track);
+    // The source is part of the key: if Tauon's API comes up after SMTC
+    // already announced the same song, its lyrics (from the file) replace
+    // whatever an online lookup found.
+    var key = $"{TrackMetadataProvider.KeyOf(track)}|{(player.TauonIsSource ? "tauon" : "smtc")}";
     if (key != lastLyricsKey)
     {
         lastLyricsKey = key;
@@ -98,7 +109,8 @@ async Task EnrichThenFetchLyricsAsync(TrackInfo track, string key)
     {
         var enrichment = await metadataProvider.LookupAsync(track);
         // Drop the result if the user already skipped to another song.
-        if (enrichment is not null && lastLyricsKey == key && currentTrack is { } latest && TrackMetadataProvider.KeyOf(latest) == key)
+        if (enrichment is not null && lastLyricsKey == key && currentTrack is { } latest
+            && TrackMetadataProvider.KeyOf(latest) == TrackMetadataProvider.KeyOf(track))
         {
             track = TrackMetadataProvider.Apply(latest, enrichment);
             PublishTrack(track);
@@ -135,11 +147,11 @@ StateMessage ToStateMessage(PlaybackState state) =>
         volumeController.GetVolume(), volumeController.GetMuted(),
         state.Shuffle, state.Repeat);
 
-smtc.StateChanged += BroadcastState;
+player.StateChanged += BroadcastState;
 
 volumeController.VolumeChanged += () =>
 {
-    if (smtc.CurrentState is { } state) BroadcastState(state);
+    if (player.CurrentState is { } state) BroadcastState(state);
 };
 
 spectrumAnalyzer.SpectrumAvailable += bands => _ = clientHub.BroadcastAsync(new SpectrumMessage(bands));
@@ -157,7 +169,15 @@ resourceMonitor.SampleAvailable += sample =>
 
 async Task FetchAndBroadcastLyricsAsync(TrackInfo track, string key)
 {
-    var result = await lyricsProvider.TryFetchAsync(track.Title, track.Artist, track.Album, track.DurationMs);
+    // The file's own lyrics (via Tauon) beat any online match: right song,
+    // right version, right timing.
+    LyricsResult? result = null;
+    if (player.TauonIsSource && await tauon.FetchLyricsAsync() is { } raw)
+    {
+        result = LyricsProvider.FromRaw(raw);
+        if (result is not null) logger.LogInformation("Letra tomada del archivo (Tauon) para '{Title}'.", track.Title);
+    }
+    result ??= await lyricsProvider.TryFetchAsync(track.Title, track.Artist, track.Album, track.DurationMs);
     if (result is null || lastLyricsKey != key) return;
 
     var message = new LyricsMessage(result.Lines, result.Plain);
@@ -193,7 +213,7 @@ async Task PushResizedArtAsync(string hash, byte[] originalBytes)
 // minutes. Shared by both transports.
 async Task SendCatchUpAsync(IClientConnection connection, CancellationToken ct)
 {
-    if (smtc.CurrentTrack is not null && currentTrack is { } track)
+    if (player.CurrentTrack is not null && currentTrack is { } track)
     {
         await clientHub.SendToAsync(connection, ToTrackMessage(track), ct);
         if (track.ArtBytes is not null && track.ArtHash is not null
@@ -202,7 +222,7 @@ async Task SendCatchUpAsync(IClientConnection connection, CancellationToken ct)
             await connection.SendArtAsync(track.ArtHash, resized.ContentType, resized.Bytes, ct);
         }
     }
-    if (smtc.CurrentState is { } state)
+    if (player.CurrentState is { } state)
     {
         await clientHub.SendToAsync(connection, ToStateMessage(state), ct);
     }
@@ -238,7 +258,7 @@ app.MapGet("/", async (HttpContext context) =>
 
     await clientHub.PumpAsync(
         connection,
-        json => CommandHandler.HandleAsync(json, smtc, volumeController, resourceMonitor, clientHub, connection, logger),
+        json => CommandHandler.HandleAsync(json, player, volumeController, resourceMonitor, clientHub, connection, logger),
         context.RequestAborted);
 });
 

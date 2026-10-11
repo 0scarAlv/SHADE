@@ -4,6 +4,7 @@ using Shade.Agent.Adb;
 using Shade.Agent.Audio;
 using Shade.Agent.Bluetooth;
 using Shade.Agent.Metadata;
+using Shade.Agent.Players;
 using Shade.Agent.Smtc;
 using Shade.Agent.Streaming;
 using Shade.Agent.SystemMonitor;
@@ -27,7 +28,7 @@ public sealed class ConsoleDashboard : BackgroundService
     private static readonly string[] PanelTitles = { "Sonando", "Conexión", "PC", "Registro" };
     private const int PanelNow = 0, PanelConnection = 1, PanelPc = 2, PanelLog = 3;
 
-    private readonly SmtcSessionWatcher _smtc;
+    private readonly PlaybackRouter _smtc;
     private readonly SystemVolumeController _volume;
     private readonly SpectrumAnalyzer _spectrum;
     private readonly ResourceMonitorService _resources;
@@ -52,7 +53,7 @@ public sealed class ConsoleDashboard : BackgroundService
     private DateTimeOffset _flashUntil;
 
     public ConsoleDashboard(
-        SmtcSessionWatcher smtc,
+        PlaybackRouter smtc,
         SystemVolumeController volume,
         SpectrumAnalyzer spectrum,
         ResourceMonitorService resources,

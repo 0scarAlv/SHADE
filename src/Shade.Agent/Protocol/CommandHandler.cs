@@ -1,6 +1,6 @@
 using System.Text.Json;
 using Shade.Agent.Audio;
-using Shade.Agent.Smtc;
+using Shade.Agent.Players;
 using Shade.Agent.Streaming;
 using Shade.Agent.SystemMonitor;
 
@@ -12,7 +12,7 @@ public static class CommandHandler
 {
     public static async Task HandleAsync(
         string json,
-        SmtcSessionWatcher smtc,
+        IPlaybackControl smtc,
         SystemVolumeController volumeController,
         ResourceMonitorService resourceMonitor,
         ClientHub clientHub,

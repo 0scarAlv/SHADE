@@ -98,6 +98,15 @@ public sealed class LyricsProvider
         }
     }
 
+    // Lyrics that came from somewhere else (e.g. a file's own tags via the
+    // Tauon API): synced if it has LRC timestamps, plain text otherwise.
+    public static LyricsResult? FromRaw(string raw)
+    {
+        var lines = ParseLrc(raw);
+        if (lines is not null) return new LyricsResult(lines, null);
+        return string.IsNullOrWhiteSpace(raw) ? null : new LyricsResult(null, raw.Trim());
+    }
+
     private static LyricsResult? ToResult(LrcLibResponse payload)
     {
         var lines = payload.SyncedLyrics is { Length: > 0 } synced ? ParseLrc(synced) : null;

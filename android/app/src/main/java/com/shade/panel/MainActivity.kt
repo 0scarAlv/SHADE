@@ -39,6 +39,7 @@ import com.shade.panel.ui.GestureNavShell
 import com.shade.panel.ui.GestureSettingsScreen
 import com.shade.panel.ui.HomeScreen
 import com.shade.panel.ui.LocalAppSettings
+import com.shade.panel.ui.InkColor
 import com.shade.panel.ui.LocalInk
 import com.shade.panel.ui.PanelViewModel
 import com.shade.panel.ui.SettingsScreen
@@ -76,6 +77,7 @@ class MainActivity : ComponentActivity() {
                 view.keepScreenOn = settings.keepScreenOn
                 onDispose { view.keepScreenOn = false }
             }
+            LaunchedEffect(settings.lyricsOffsetMs) { viewModel.lyricsOffsetMs = settings.lyricsOffsetMs }
             LaunchedEffect(settings.immersive) {
                 immersiveEnabled = settings.immersive
                 applyImmersive(settings.immersive)
@@ -83,7 +85,7 @@ class MainActivity : ComponentActivity() {
 
             CompositionLocalProvider(
                 LocalAppSettings provides settings,
-                LocalInk provides settings.inkColor.color,
+                LocalInk provides if (settings.inkColor == InkColor.AUTO) accent else settings.inkColor.color,
             ) {
                 ShadeTheme(accent = accent) {
                     // Without a Surface, LocalContentColor never gets set from the

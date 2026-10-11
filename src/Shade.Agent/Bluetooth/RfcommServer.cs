@@ -1,6 +1,6 @@
 using Shade.Agent.Audio;
 using Shade.Agent.Protocol;
-using Shade.Agent.Smtc;
+using Shade.Agent.Players;
 using Shade.Agent.Streaming;
 using Shade.Agent.SystemMonitor;
 using Windows.Devices.Bluetooth.Rfcomm;
@@ -25,7 +25,7 @@ public sealed class RfcommServer : BackgroundService
     private const string SdpServiceName = "Shade";
 
     private readonly ClientHub _clientHub;
-    private readonly SmtcSessionWatcher _smtc;
+    private readonly PlaybackRouter _smtc;
     private readonly SystemVolumeController _volumeController;
     private readonly ResourceMonitorService _resourceMonitor;
     private readonly ILogger<RfcommServer> _logger;
@@ -39,7 +39,7 @@ public sealed class RfcommServer : BackgroundService
 
     public RfcommServer(
         ClientHub clientHub,
-        SmtcSessionWatcher smtc,
+        PlaybackRouter smtc,
         SystemVolumeController volumeController,
         ResourceMonitorService resourceMonitor,
         ILogger<RfcommServer> logger)

@@ -97,7 +97,10 @@ object Ink {
 
 // Accent ink used for every "lit" element. Persisted as a name, so the enum
 // constants double as the stored values.
+// AUTO follows the current cover (see ArtPalette / MainActivity); its
+// `color` is only the swatch shown in settings.
 enum class InkColor(val color: Color, val labelRes: Int) {
+    AUTO(Color(0xFFB794F6), R.string.vfd_auto),
     CYAN(Color(0xFF5EEAD4), R.string.vfd_cyan),
     AMBER(Color(0xFFFFB13B), R.string.vfd_amber),
     RED(Color(0xFFFF4A3D), R.string.vfd_red),

@@ -298,8 +298,11 @@ class PanelViewModel(
     private fun List<Float>.pushed(value: Float): List<Float> =
         if (size >= HISTORY_SIZE) drop(size - HISTORY_SIZE + 1) + value else this + value
 
+    // Set from the user's setting (see MainActivity); applied on the next tick.
+    var lyricsOffsetMs: Int = 0
+
     private fun indexAt(positionMs: Long): Int =
-        lyricsLines.indexOfLast { it.timeMs <= positionMs }
+        lyricsLines.indexOfLast { it.timeMs <= positionMs + lyricsOffsetMs }
 
     fun playPause() {
         // Optimistic flip so the button reacts instantly; the agent's state

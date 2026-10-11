@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -50,7 +51,7 @@ fun SettingsScreen(onBack: () -> Unit) {
         Section(stringResource(R.string.settings_section_vfd)) {
             Text(stringResource(R.string.settings_vfd_desc), style = descStyle)
             Spacer(Modifier.height(12.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 InkColor.entries.forEach { option ->
                     KeyButton(
                         onClick = { settings.inkColor = option },
@@ -60,12 +61,37 @@ fun SettingsScreen(onBack: () -> Unit) {
                         activeColor = option.color,
                         caption = stringResource(option.labelRes),
                     ) {
-                        Box(
-                            Modifier
-                                .size(width = 22.dp, height = 8.dp)
-                                .background(option.color.copy(alpha = if (settings.inkColor == option) 1f else 0.35f)),
-                        )
+                        if (option == InkColor.AUTO) {
+                            CapLabel("AUTO", 10.sp)
+                        } else {
+                            Box(
+                                Modifier
+                                    .size(width = 22.dp, height = 8.dp)
+                                    .background(option.color.copy(alpha = if (settings.inkColor == option) 1f else 0.35f)),
+                            )
+                        }
                     }
+                }
+            }
+        }
+        Section(stringResource(R.string.settings_section_lyrics)) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(stringResource(R.string.settings_lyrics_offset), style = titleStyle)
+                    Text(stringResource(R.string.settings_lyrics_offset_desc), style = descStyle)
+                }
+                Spacer(Modifier.width(12.dp))
+                KeyButton(onClick = { settings.lyricsOffsetMs = (settings.lyricsOffsetMs - LYRICS_STEP_MS).coerceAtLeast(-LYRICS_MAX_MS) }, width = 44.dp, height = 36.dp) {
+                    CapLabel("−", 16.sp)
+                }
+                Readout(
+                    "%+.2f".format(java.util.Locale.US, settings.lyricsOffsetMs / 1000f),
+                    18.sp,
+                    template = "+0.00",
+                    modifier = Modifier.padding(horizontal = 10.dp),
+                )
+                KeyButton(onClick = { settings.lyricsOffsetMs = (settings.lyricsOffsetMs + LYRICS_STEP_MS).coerceAtMost(LYRICS_MAX_MS) }, width = 44.dp, height = 36.dp) {
+                    CapLabel("+", 16.sp)
                 }
             }
         }
@@ -92,6 +118,9 @@ fun SettingsScreen(onBack: () -> Unit) {
 }
 
 // ------------------------------------------------------------------ shared page parts
+
+private const val LYRICS_STEP_MS = 250
+private const val LYRICS_MAX_MS = 3_000
 
 val descStyle = TextStyle(fontFamily = Manrope, fontWeight = FontWeight.Medium, fontSize = 12.sp, color = Ink.TextMuted, lineHeight = 16.sp)
 private val titleStyle = TextStyle(fontFamily = Manrope, fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Ink.Text)

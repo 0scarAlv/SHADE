@@ -4,6 +4,7 @@ using System.Linq;
 using Windows.Media;
 using Windows.Media.Control;
 using Windows.Storage.Streams;
+using Shade.Agent.Players;
 
 namespace Shade.Agent.Smtc;
 
@@ -13,7 +14,7 @@ namespace Shade.Agent.Smtc;
 // threadpool; that's why the handlers are "async void" (the only signature
 // WinRT accepts for an event) but delegate the real work to methods that
 // catch their own exceptions, so a WinRT callback can never crash the process.
-public sealed class SmtcSessionWatcher : IAsyncDisposable
+public sealed class SmtcSessionWatcher : IAsyncDisposable, IPlaybackControl
 {
     private readonly ILogger<SmtcSessionWatcher> _logger;
     private GlobalSystemMediaTransportControlsSessionManager? _manager;

@@ -18,6 +18,7 @@ class AppSettings(private val preferences: ShadePreferences) {
     private var clockSecondsState by mutableStateOf(preferences.clockSeconds)
     private var burnInState by mutableStateOf(preferences.burnInProtection)
     private var inkColorState by mutableStateOf(InkColor.fromName(preferences.inkColor))
+    private var lyricsOffsetState by mutableStateOf(preferences.lyricsOffsetMs)
 
     var keepScreenOn: Boolean
         get() = keepScreenOnState
@@ -45,6 +46,13 @@ class AppSettings(private val preferences: ShadePreferences) {
         set(value) {
             inkColorState = value
             preferences.inkColor = value.name
+        }
+
+    var lyricsOffsetMs: Int
+        get() = lyricsOffsetState
+        set(value) {
+            lyricsOffsetState = value
+            preferences.lyricsOffsetMs = value
         }
 
     var burnInProtection: Boolean

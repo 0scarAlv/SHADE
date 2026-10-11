@@ -50,6 +50,12 @@ class ShadePreferences(context: Context) {
         get() = prefs.getString(KEY_VFD_COLOR, null) ?: "CYAN"
         set(value) = prefs.edit { putString(KEY_VFD_COLOR, value) }
 
+    // Shifts lyric timing: positive shows each line earlier, for tracks
+    // whose synced lyrics lag the audio.
+    var lyricsOffsetMs: Int
+        get() = prefs.getInt(KEY_LYRICS_OFFSET, 0)
+        set(value) = prefs.edit { putInt(KEY_LYRICS_OFFSET, value) }
+
     var swipeRight: NavScreen?
         get() = getDirection(KEY_SWIPE_RIGHT, NavScreen.STATS)
         set(value) = setDirection(KEY_SWIPE_RIGHT, value)
@@ -94,6 +100,7 @@ class ShadePreferences(context: Context) {
         const val KEY_CLOCK_SECONDS = "clock_seconds"
         const val KEY_BURN_IN = "burn_in_protection"
         const val KEY_VFD_COLOR = "vfd_color"
+        const val KEY_LYRICS_OFFSET = "lyrics_offset_ms"
         const val KEY_SWIPE_RIGHT = "swipe_right"
         const val KEY_SWIPE_LEFT = "swipe_left"
         const val KEY_SWIPE_UP = "swipe_up"
