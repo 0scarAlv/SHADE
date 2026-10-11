@@ -17,6 +17,7 @@ Compression=lzma
 SolidCompression=yes
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
+SetupIconFile=..\src\Shade.Agent\shade.ico
 UninstallDisplayIcon={app}\{#MyAppExeName}
 
 [Languages]
