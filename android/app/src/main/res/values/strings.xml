@@ -5,6 +5,7 @@
     <!-- Player -->
     <string name="no_track">Nada sonando</string>
     <string name="no_track_hint">Reproduce algo en tu PC</string>
+    <string name="waiting_short">Sin enlace</string>
     <string name="waiting_for_agent">Esperando al agente de Shade en la PC…</string>
     <string name="playing_on">Sonando en %1$s</string>
     <string name="no_lyrics_available">Sin letra disponible</string>
@@ -88,6 +89,13 @@
 
     <!-- Settings -->
     <string name="settings_title">Ajustes</string>
+    <string name="settings_section_vfd">Color del display</string>
+    <string name="settings_vfd_desc">El color de los dígitos y textos de la pantalla VFD</string>
+    <string name="vfd_cyan">Cian</string>
+    <string name="vfd_amber">Ámbar</string>
+    <string name="vfd_red">Rojo</string>
+    <string name="vfd_green">Verde</string>
+    <string name="vfd_ice">Hielo</string>
     <string name="settings_section_display">Pantalla</string>
     <string name="settings_keep_screen_on">Mantener encendida</string>
     <string name="settings_keep_screen_on_desc">La pantalla no se apaga mientras Shade está abierto</string>

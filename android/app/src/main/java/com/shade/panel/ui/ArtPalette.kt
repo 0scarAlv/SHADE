@@ -128,6 +128,3 @@ private const val SAMPLE_SIZE_PX = 64
 private const val HUE_BUCKETS = 36
 private const val MIN_VIVID_SHARE = 0.015f
 
-// Animated palette for the current track, provided once by MainActivity.
-// Dynamic (not static) local so only readers recompose while it animates.
-val LocalArtPalette = androidx.compose.runtime.compositionLocalOf { DefaultArtPalette }

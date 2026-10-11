@@ -45,6 +45,11 @@ class ShadePreferences(context: Context) {
         get() = prefs.getBoolean(KEY_BURN_IN, true)
         set(value) = prefs.edit { putBoolean(KEY_BURN_IN, value) }
 
+    // Color of the VFD-style display in the Hi-Fi UI (see VfdColor).
+    var vfdColor: String
+        get() = prefs.getString(KEY_VFD_COLOR, null) ?: "CYAN"
+        set(value) = prefs.edit { putString(KEY_VFD_COLOR, value) }
+
     var swipeRight: NavScreen?
         get() = getDirection(KEY_SWIPE_RIGHT, NavScreen.STATS)
         set(value) = setDirection(KEY_SWIPE_RIGHT, value)
@@ -88,6 +93,7 @@ class ShadePreferences(context: Context) {
         const val KEY_IMMERSIVE = "immersive"
         const val KEY_CLOCK_SECONDS = "clock_seconds"
         const val KEY_BURN_IN = "burn_in_protection"
+        const val KEY_VFD_COLOR = "vfd_color"
         const val KEY_SWIPE_RIGHT = "swipe_right"
         const val KEY_SWIPE_LEFT = "swipe_left"
         const val KEY_SWIPE_UP = "swipe_up"

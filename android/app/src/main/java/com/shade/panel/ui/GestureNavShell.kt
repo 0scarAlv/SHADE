@@ -4,8 +4,6 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.ContentTransform
-import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -18,21 +16,13 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.Home
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -44,7 +34,6 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
@@ -55,6 +44,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.shade.panel.R
 import com.shade.panel.data.NavScreen
 import com.shade.panel.data.ShadePreferences
@@ -155,14 +145,9 @@ fun GestureNavShell(viewModel: PanelViewModel, initialScreen: NavScreen, onExit:
                 .windowInsetsPadding(WindowInsets.safeDrawing)
                 .padding(top = 14.dp, end = 14.dp),
         ) {
-            CircleIconButton(
-                icon = Icons.Rounded.Home,
-                contentDescription = stringResource(R.string.action_home),
-                onClick = onExit,
-                size = 44.dp,
-                iconSize = 22.dp,
-                container = Color.White.copy(alpha = 0.08f),
-            )
+            HwButton(onClick = onExit, width = 56.dp, height = 32.dp, contentDescription = stringResource(R.string.action_home)) {
+                CapLabel("HOME", 10.sp)
+            }
         }
 
         PageIndicator(
@@ -187,36 +172,17 @@ private fun PageIndicator(current: NavScreen, trigger: Int, modifier: Modifier =
         delay(1_600)
         visible = false
     }
-    val accent = MaterialTheme.colorScheme.primary
-
-    AnimatedVisibility(visible = visible, enter = fadeIn(tween(200)), exit = fadeOut(tween(500)), modifier = modifier) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(
-                text = stringResource(current.labelRes()),
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.8f),
-            )
-            Row(
-                modifier = Modifier.padding(top = 6.dp),
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                PANEL_SCREENS.forEach { screen ->
-                    val selected = screen == current
-                    val width by animateDpAsState(if (selected) 20.dp else 6.dp, tween(250), label = "dotWidth")
-                    val color by animateColorAsState(
-                        if (selected) accent else Color.White.copy(alpha = 0.3f),
-                        tween(250),
-                        label = "dotColor",
-                    )
-                    Box(
-                        modifier = Modifier
-                            .height(6.dp)
-                            .width(width)
-                            .clip(CircleShape)
-                            .background(color),
-                    )
-                }
+    // A row of labeled LEDs, like a source indicator on a receiver.
+    AnimatedVisibility(visible = visible, enter = fadeIn(tween(150)), exit = fadeOut(tween(500)), modifier = modifier) {
+        Row(
+            modifier = Modifier
+                .background(Color.Black.copy(alpha = 0.75f), RoundedCornerShape(4.dp))
+                .padding(horizontal = 12.dp, vertical = 6.dp),
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            PANEL_SCREENS.forEach { screen ->
+                LedLabel(stringResource(screen.labelRes()), on = screen == current)
             }
         }
     }

@@ -34,13 +34,12 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.shade.panel.data.NavScreen
 import com.shade.panel.data.ShadePreferences
 import com.shade.panel.ui.AppSettings
-import com.shade.panel.ui.ArtPalette
 import com.shade.panel.ui.BluetoothSettingsScreen
 import com.shade.panel.ui.GestureNavShell
 import com.shade.panel.ui.GestureSettingsScreen
 import com.shade.panel.ui.HomeScreen
 import com.shade.panel.ui.LocalAppSettings
-import com.shade.panel.ui.LocalArtPalette
+import com.shade.panel.ui.LocalVfd
 import com.shade.panel.ui.PanelViewModel
 import com.shade.panel.ui.SettingsScreen
 import com.shade.panel.ui.panelViewModelFactory
@@ -66,12 +65,11 @@ class MainActivity : ComponentActivity() {
             val viewModel: PanelViewModel = viewModel(factory = panelViewModelFactory(context))
             val uiState by viewModel.uiState.collectAsState()
 
-            // The whole UI is tinted by the current cover; animate between
-            // palettes so a track change washes the color over instead of
-            // snapping.
+            // The Hi-Fi screens use the fixed VFD color (LocalVfd); the clock
+            // keeps its accent from the current cover, animated between
+            // palettes so a track change washes the color over.
             val palette = rememberArtPalette(uiState.art)
             val accent by animateColorAsState(palette.accent, tween(900), label = "accent")
-            val backdrop by animateColorAsState(palette.backdrop, tween(900), label = "backdrop")
 
             val view = LocalView.current
             DisposableEffect(settings.keepScreenOn) {
@@ -85,7 +83,7 @@ class MainActivity : ComponentActivity() {
 
             CompositionLocalProvider(
                 LocalAppSettings provides settings,
-                LocalArtPalette provides ArtPalette(accent, backdrop),
+                LocalVfd provides settings.vfdColor.color,
             ) {
                 ShadeTheme(accent = accent) {
                     // Without a Surface, LocalContentColor never gets set from the

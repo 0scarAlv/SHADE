@@ -17,6 +17,7 @@ class AppSettings(private val preferences: ShadePreferences) {
     private var immersiveState by mutableStateOf(preferences.immersive)
     private var clockSecondsState by mutableStateOf(preferences.clockSeconds)
     private var burnInState by mutableStateOf(preferences.burnInProtection)
+    private var vfdColorState by mutableStateOf(VfdColor.fromName(preferences.vfdColor))
 
     var keepScreenOn: Boolean
         get() = keepScreenOnState
@@ -37,6 +38,13 @@ class AppSettings(private val preferences: ShadePreferences) {
         set(value) {
             clockSecondsState = value
             preferences.clockSeconds = value
+        }
+
+    var vfdColor: VfdColor
+        get() = vfdColorState
+        set(value) {
+            vfdColorState = value
+            preferences.vfdColor = value.name
         }
 
     var burnInProtection: Boolean

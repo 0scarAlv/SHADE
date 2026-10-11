@@ -11,7 +11,7 @@ import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import com.shade.panel.R
 
-// Manrope ships as a single variable font (OFL, see android/FONT_LICENSE_Manrope_OFL.txt);
+// Manrope ships as a single variable font (OFL, see android/font-licenses/);
 // each weight below is the same file with a different wght axis value.
 @OptIn(ExperimentalTextApi::class)
 private fun manrope(weight: FontWeight) = Font(
