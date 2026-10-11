@@ -1,6 +1,7 @@
 using Shade.Agent.Adb;
 using Shade.Agent.Audio;
 using Shade.Agent.Bluetooth;
+using Shade.Agent.Dashboard;
 using Shade.Agent.Lyrics;
 using Shade.Agent.Protocol;
 using Shade.Agent.Smtc;
@@ -10,13 +11,26 @@ using Shade.Agent.SystemMonitor;
 var builder = WebApplication.CreateBuilder(args);
 builder.WebHost.UseUrls("http://127.0.0.1:8080");
 
+// Interactive console -> lazygit-style dashboard (see ConsoleDashboard), with
+// logs captured into a buffer it renders as a panel. `--plain` or a
+// redirected console keeps the classic scrolling log instead.
+var dashboardEnabled = ConsoleDashboard.ShouldRun(args);
+var snapshotPath = args.SkipWhile(a => a != "--dashboard-snapshot").Skip(1).FirstOrDefault();
+var logBuffer = new LogBuffer();
+builder.Services.AddSingleton(logBuffer);
+if (dashboardEnabled) builder.Logging.ClearProviders();
+builder.Logging.AddProvider(new BufferLoggerProvider(logBuffer));
+builder.Services.AddSingleton<ConsoleDashboard>();
+if (dashboardEnabled) builder.Services.AddHostedService(sp => sp.GetRequiredService<ConsoleDashboard>());
+
 builder.Services.AddSingleton<SmtcSessionWatcher>();
 builder.Services.AddSingleton<ArtCache>();
 builder.Services.AddSingleton<ClientHub>();
 builder.Services.AddSingleton<SystemVolumeController>();
 builder.Services.AddSingleton<SpectrumAnalyzer>();
 builder.Services.AddSingleton<LyricsProvider>();
-builder.Services.AddHostedService<AdbReverseWatchdog>();
+builder.Services.AddSingleton<AdbReverseWatchdog>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<AdbReverseWatchdog>());
 builder.Services.AddSingleton<RfcommServer>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<RfcommServer>());
 builder.Services.AddSingleton<ResourceMonitorService>();
@@ -203,5 +217,18 @@ app.MapGet("/art/{hash}", (string hash) =>
 
     return Results.File(art.Bytes, art.ContentType);
 });
+
+// Dev aid: render one dashboard frame to a text file after a few seconds
+// of live data, then exit — checks the layout without a real terminal.
+if (snapshotPath is not null)
+{
+    app.Lifetime.ApplicationStarted.Register(() => _ = Task.Run(async () =>
+    {
+        await Task.Delay(4_000);
+        var dashboard = app.Services.GetRequiredService<ConsoleDashboard>();
+        await File.WriteAllTextAsync(snapshotPath, dashboard.RenderSnapshot(120, 34) + "\n---\n" + dashboard.RenderSnapshot(80, 24));
+        app.Lifetime.StopApplication();
+    }));
+}
 
 app.Run();

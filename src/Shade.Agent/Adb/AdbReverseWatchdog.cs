@@ -6,6 +6,8 @@ namespace Shade.Agent.Adb;
 // app, stops with the app). This one polls `adb reverse` every few seconds
 // and re-establishes it if it drops from a cable disconnect or the adb
 // server restarting.
+public enum AdbTunnelStatus { Checking, Active, NoDevice, Error }
+
 public sealed class AdbReverseWatchdog : BackgroundService
 {
     private const string ReversePortSpec = "tcp:8080 tcp:8080";
@@ -13,6 +15,13 @@ public sealed class AdbReverseWatchdog : BackgroundService
     private readonly string _adbPath;
     private readonly TimeSpan _checkInterval;
     private readonly ILogger<AdbReverseWatchdog> _logger;
+
+    // Lets the console dashboard force an immediate re-check instead of
+    // waiting out the rest of the poll interval.
+    private readonly SemaphoreSlim _recheckSignal = new(0, 1);
+
+    public AdbTunnelStatus Status { get; private set; } = AdbTunnelStatus.Checking;
+    public string? LastError { get; private set; }
 
     public AdbReverseWatchdog(IConfiguration configuration, ILogger<AdbReverseWatchdog> logger)
     {
@@ -33,18 +42,41 @@ public sealed class AdbReverseWatchdog : BackgroundService
         {
             try
             {
-                if (!await IsReverseActiveAsync(stoppingToken))
+                if (await IsReverseActiveAsync(stoppingToken))
+                {
+                    Status = AdbTunnelStatus.Active;
+                    LastError = null;
+                }
+                else
                 {
                     await EstablishReverseAsync(stoppingToken);
                 }
             }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            {
+                break;
+            }
             catch (Exception ex)
             {
+                Status = AdbTunnelStatus.Error;
+                LastError = ex.Message;
                 _logger.LogWarning(ex, "Fallo comprobando/estableciendo 'adb reverse'.");
             }
 
-            await Task.Delay(_checkInterval, stoppingToken);
+            try
+            {
+                await _recheckSignal.WaitAsync(_checkInterval, stoppingToken);
+            }
+            catch (OperationCanceledException)
+            {
+                break;
+            }
         }
+    }
+
+    public void RequestRecheck()
+    {
+        if (_recheckSignal.CurrentCount == 0) _recheckSignal.Release();
     }
 
     private async Task<bool> IsReverseActiveAsync(CancellationToken ct)
@@ -58,11 +90,30 @@ public sealed class AdbReverseWatchdog : BackgroundService
         var (exitCode, _, stderr) = await RunAdbAsync($"reverse {ReversePortSpec}", ct);
         if (exitCode == 0)
         {
+            Status = AdbTunnelStatus.Active;
+            LastError = null;
             _logger.LogInformation("'adb reverse {Spec}' establecido.", ReversePortSpec);
         }
         else
         {
-            _logger.LogWarning("No se pudo establecer 'adb reverse': {Error}", stderr.Trim());
+            var error = stderr.Trim();
+            var noDevice = error.Contains("no devices", StringComparison.OrdinalIgnoreCase)
+                || error.Contains("device not found", StringComparison.OrdinalIgnoreCase);
+            // A phone simply not being plugged in is the normal idle state,
+            // not a warning — only log when it changes into that state.
+            if (noDevice)
+            {
+                if (Status != AdbTunnelStatus.NoDevice)
+                    _logger.LogInformation("Sin dispositivo USB para 'adb reverse'; esperando…");
+                Status = AdbTunnelStatus.NoDevice;
+                LastError = null;
+            }
+            else
+            {
+                Status = AdbTunnelStatus.Error;
+                LastError = error;
+                _logger.LogWarning("No se pudo establecer 'adb reverse': {Error}", error);
+            }
         }
     }
 

@@ -10,6 +10,7 @@ namespace Shade.Agent.Streaming;
 public sealed class ClientHub
 {
     private readonly ConcurrentDictionary<Guid, IClientConnection> _clients = new();
+    private readonly ConcurrentDictionary<Guid, DateTimeOffset> _connectedAt = new();
     private readonly ILogger<ClientHub> _logger;
 
     public ClientHub(ILogger<ClientHub> logger)
@@ -20,6 +21,7 @@ public sealed class ClientHub
     public void Register(IClientConnection connection)
     {
         _clients[connection.Id] = connection;
+        _connectedAt[connection.Id] = DateTimeOffset.Now;
         _logger.LogInformation("Cliente conectado ({Id}, {Transport}). Total: {Count}", connection.Id, connection.Transport, _clients.Count);
     }
 
@@ -48,10 +50,19 @@ public sealed class ClientHub
         finally
         {
             _clients.TryRemove(connection.Id, out _);
+            _connectedAt.TryRemove(connection.Id, out _);
             await connection.DisposeAsync();
             _logger.LogInformation("Cliente desconectado ({Id}). Total: {Count}", connection.Id, _clients.Count);
         }
     }
+
+    // Read-only view for the console dashboard.
+    public IReadOnlyList<(Guid Id, ClientTransport Transport, DateTimeOffset ConnectedAt)> Snapshot() =>
+        _clients.Values
+            .Where(c => c.IsOpen)
+            .Select(c => (c.Id, c.Transport, _connectedAt.TryGetValue(c.Id, out var at) ? at : DateTimeOffset.Now))
+            .OrderBy(c => c.Item3)
+            .ToList();
 
     public Task BroadcastAsync(object message, CancellationToken ct = default)
     {

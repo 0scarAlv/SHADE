@@ -12,8 +12,12 @@ namespace Shade.Agent.Bluetooth;
 // Advertises the Shade RFCOMM service so the phone can reach the agent without
 // adb/USB. Sibling of AdbReverseWatchdog: both are just "keep a transport
 // alive" hosted services, running side by side.
+public enum BluetoothStatus { Starting, Advertising, Unavailable }
+
 public sealed class RfcommServer : BackgroundService
 {
+    public BluetoothStatus Status { get; private set; } = BluetoothStatus.Starting;
+
     // SDP attribute id 0x0100 = ServiceName; 0x25 = "UTF-8 text string, length
     // in the next byte" per the Bluetooth SDP attribute type encoding.
     private const uint SdpServiceNameAttributeId = 0x100;
@@ -76,10 +80,12 @@ public sealed class RfcommServer : BackgroundService
             _provider.SdpRawAttributes.Add(SdpServiceNameAttributeId, sdpWriter.DetachBuffer());
 
             _provider.StartAdvertising(_listener, true);
+            Status = BluetoothStatus.Advertising;
             _logger.LogInformation("Servicio RFCOMM anunciándose ({Uuid}).", ShadeRfcommService.Uuid);
         }
         catch (Exception ex)
         {
+            Status = BluetoothStatus.Unavailable;
             _logger.LogWarning(ex, "No se pudo iniciar el servidor RFCOMM (¿sin adaptador Bluetooth?). El agente sigue funcionando sin Bluetooth.");
             return;
         }

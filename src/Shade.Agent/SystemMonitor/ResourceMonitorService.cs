@@ -47,6 +47,8 @@ public sealed class ResourceMonitorService : BackgroundService
 
     public event Action<ResourceSample>? SampleAvailable;
 
+    public ResourceSample? LastSample { get; private set; }
+
     // Reference-swapped wholesale each tick (see SampleProcesses) — reads
     // from a different async context than the tick loop are safe without a
     // lock since a reference assignment is atomic.
@@ -58,7 +60,9 @@ public sealed class ResourceMonitorService : BackgroundService
         using var timer = new PeriodicTimer(SampleInterval);
         while (await timer.WaitForNextTickAsync(stoppingToken))
         {
-            SampleAvailable?.Invoke(Sample());
+            var sample = Sample();
+            LastSample = sample;
+            SampleAvailable?.Invoke(sample);
         }
     }
 

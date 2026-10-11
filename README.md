@@ -40,6 +40,18 @@ No incluido todavía: ver el roadmap hacia 1.0 (memoria del proyecto).
 dotnet run --project src/Shade.Agent
 ```
 
+En una consola interactiva el agente abre un panel estilo lazygit
+(`Dashboard/ConsoleDashboard.cs`): lo que suena con espectro en vivo,
+estado de USB/Bluetooth y clientes, recursos del PC y el registro.
+Atajos: `espacio` play/pausa, `n`/`p` siguiente/anterior, `←`/`→` ±10 s,
+`+`/`-` volumen, `m` silenciar, `s` aleatorio, `r` repetir, `tab`/`1-4`
+cambiar de panel, `q` salir. En el panel de registro: `↑↓` desplazar,
+`l` filtrar por nivel, `c` limpiar. En Conexión: `a` revisa adb ya.
+
+`--plain` (o una consola redirigida) vuelve al log clásico línea a línea.
+`--dashboard-snapshot <archivo>` escribe un frame del panel en texto y
+sale (útil para revisar el layout sin terminal).
+
 Requiere el SDK de .NET 8. La ruta a `adb.exe` se configura en
 `src/Shade.Agent/appsettings.json` (`Adb:Path`).
 
@@ -47,7 +59,7 @@ Requiere el SDK de .NET 8. La ruta a `adb.exe` se configura en
 
 ```
 cd android
-./gradlew.bat :app:installDebug   # o :app:assembleRelease
+./gradlew.bat :app:installRelease   # firma release (keystore.properties)
 ```
 
 Necesita `android/local.properties` con `sdk.dir` (gitignored) y, para
