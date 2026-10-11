@@ -93,33 +93,46 @@ public sealed class ConsoleDashboard : BackgroundService
 
         Console.OutputEncoding = Encoding.UTF8;
         Console.Title = "Shade Server";
-        Console.CursorVisible = false;
+        EnableVirtualTerminal();
         var keyLoop = Task.Run(() => KeyLoopAsync(stoppingToken), stoppingToken);
 
+        // Hand-rolled render loop instead of Spectre's Live display: Live
+        // moves the cursor up by the previous frame's height, which breaks
+        // as soon as the window is resized (the terminal reflows the old
+        // frame and every later frame lands offset). Here each frame is
+        // drawn absolutely from the top-left of the alternate screen buffer
+        // (no scrollback to reflow), and any size change wipes the screen.
+        var output = Console.Out;
+        output.Write(AltScreenOn + HideCursor + ClearScreen);
+        output.Flush();
+        var lastWidth = -1;
+        var lastHeight = -1;
         try
         {
-            AnsiConsole.Clear();
-            await AnsiConsole.Live(Render(Console.WindowWidth, Console.WindowHeight))
-                .AutoClear(true)
-                .Overflow(VerticalOverflow.Crop)
-                .Cropping(VerticalOverflowCropping.Bottom)
-                .StartAsync(async ctx =>
+            while (!stoppingToken.IsCancellationRequested)
+            {
+                var (width, height) = WindowSize();
+                if (width != lastWidth || height != lastHeight)
                 {
-                    while (!stoppingToken.IsCancellationRequested)
-                    {
-                        // One row short of the window: filling the very last
-                        // row makes conhost scroll, which reads as flicker.
-                        ctx.UpdateTarget(Render(Console.WindowWidth, Console.WindowHeight - 1));
-                        ctx.Refresh();
-                        try { await Task.Delay(RefreshMs, stoppingToken); }
-                        catch (OperationCanceledException) { break; }
-                    }
-                });
+                    lastWidth = width;
+                    lastHeight = height;
+                    output.Write(ClearScreen);
+                }
+
+                // One column short so a full-width row never triggers the
+                // terminal's auto-wrap; no trailing newline so the last row
+                // never scrolls the buffer.
+                output.Write(CursorHome + RenderAnsi(Math.Max(1, width - 1), height));
+                output.Flush();
+
+                try { await Task.Delay(RefreshMs, stoppingToken); }
+                catch (OperationCanceledException) { break; }
+            }
         }
         finally
         {
-            Console.CursorVisible = true;
-            AnsiConsole.Clear();
+            output.Write(ShowCursor + AltScreenOff);
+            output.Flush();
             // Whatever made the agent stop is usually in the last few lines —
             // leave them on screen instead of a blank window.
             foreach (var entry in _log.Snapshot().TakeLast(12))
@@ -129,6 +142,68 @@ public sealed class ConsoleDashboard : BackgroundService
 
         await keyLoop.ContinueWith(_ => { }, TaskScheduler.Default);
     }
+
+    private const string AltScreenOn = "\u001b[?1049h";
+    private const string AltScreenOff = "\u001b[?1049l";
+    private const string HideCursor = "\u001b[?25l";
+    private const string ShowCursor = "\u001b[?25h";
+    private const string ClearScreen = "\u001b[2J";
+    private const string CursorHome = "\u001b[H";
+    private const string ClearToLineEnd = "\u001b[K";
+
+    private static (int Width, int Height) WindowSize()
+    {
+        try
+        {
+            return (Console.WindowWidth, Console.WindowHeight);
+        }
+        catch (IOException)
+        {
+            // Can throw mid-resize on some hosts; next tick will catch up.
+            return (100, 30);
+        }
+    }
+
+    // Renders one frame to an ANSI string sized exactly to width x height,
+    // with every row ending in "erase to end of line" so nothing from a
+    // wider previous frame survives.
+    private string RenderAnsi(int width, int height)
+    {
+        var writer = new StringWriter();
+        var console = AnsiConsole.Create(new AnsiConsoleSettings
+        {
+            Ansi = AnsiSupport.Yes,
+            ColorSystem = ColorSystemSupport.TrueColor,
+            Interactive = InteractionSupport.No,
+            Out = new AnsiConsoleOutput(writer),
+        });
+        console.Profile.Width = width;
+        console.Profile.Height = height;
+        console.Write(Render(width, height));
+
+        var lines = writer.ToString().Replace("\r\n", "\n").TrimEnd('\n').Split('\n');
+        return string.Join(ClearToLineEnd + "\r\n", lines.Take(height)) + ClearToLineEnd;
+    }
+
+    // conhost only interprets ANSI escapes with this mode flag set; Windows
+    // Terminal already has it on, so this is a harmless no-op there.
+    private static void EnableVirtualTerminal()
+    {
+        const int stdOutputHandle = -11;
+        const uint enableVirtualTerminalProcessing = 0x0004;
+        var handle = GetStdHandle(stdOutputHandle);
+        if (GetConsoleMode(handle, out var mode))
+            SetConsoleMode(handle, mode | enableVirtualTerminalProcessing);
+    }
+
+    [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
+    private static extern IntPtr GetStdHandle(int nStdHandle);
+
+    [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool GetConsoleMode(IntPtr hConsoleHandle, out uint lpMode);
+
+    [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool SetConsoleMode(IntPtr hConsoleHandle, uint dwMode);
 
     // Renders a single frame to a plain-text console of the given size —
     // used by `--dashboard-snapshot` to check the layout without a terminal.
