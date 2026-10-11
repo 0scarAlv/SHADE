@@ -3,6 +3,7 @@ using Shade.Agent.Audio;
 using Shade.Agent.Bluetooth;
 using Shade.Agent.Dashboard;
 using Shade.Agent.Lyrics;
+using Shade.Agent.Metadata;
 using Shade.Agent.Protocol;
 using Shade.Agent.Smtc;
 using Shade.Agent.Streaming;
@@ -29,6 +30,7 @@ builder.Services.AddSingleton<ClientHub>();
 builder.Services.AddSingleton<SystemVolumeController>();
 builder.Services.AddSingleton<SpectrumAnalyzer>();
 builder.Services.AddSingleton<LyricsProvider>();
+builder.Services.AddSingleton<TrackMetadataProvider>();
 builder.Services.AddSingleton<AdbReverseWatchdog>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<AdbReverseWatchdog>());
 builder.Services.AddSingleton<RfcommServer>();
@@ -44,6 +46,7 @@ var clientHub = app.Services.GetRequiredService<ClientHub>();
 var volumeController = app.Services.GetRequiredService<SystemVolumeController>();
 var spectrumAnalyzer = app.Services.GetRequiredService<SpectrumAnalyzer>();
 var lyricsProvider = app.Services.GetRequiredService<LyricsProvider>();
+var metadataProvider = app.Services.GetRequiredService<TrackMetadataProvider>();
 var rfcommServer = app.Services.GetRequiredService<RfcommServer>();
 var resourceMonitor = app.Services.GetRequiredService<ResourceMonitorService>();
 var logger = app.Services.GetRequiredService<ILogger<Program>>();
@@ -51,9 +54,31 @@ var logger = app.Services.GetRequiredService<ILogger<Program>>();
 string? lastLyricsKey = null;
 LyricsMessage? currentLyrics = null;
 ResourceMessage? currentResource = null;
+// The SMTC track merged with any metadata looked up for it (see
+// TrackMetadataProvider) — what clients are actually shown.
+TrackInfo? currentTrack = null;
 
 smtc.TrackChanged += track =>
 {
+    // SMTC re-fires for the same song with the same sparse data; reapply
+    // what an earlier lookup found so the art/album don't flicker away.
+    if (metadataProvider.TryGetCached(track, out var known))
+        track = TrackMetadataProvider.Apply(track, known);
+    PublishTrack(track);
+
+    var key = TrackMetadataProvider.KeyOf(track);
+    if (key != lastLyricsKey)
+    {
+        lastLyricsKey = key;
+        currentLyrics = null; // clear until the new fetch resolves, so a client
+                               // connecting mid-fetch doesn't get the old song's lyrics
+        _ = EnrichThenFetchLyricsAsync(track, key);
+    }
+};
+
+void PublishTrack(TrackInfo track)
+{
+    currentTrack = track;
     if (track.ArtBytes is not null && track.ArtHash is not null && track.ArtContentType is not null)
     {
         artCache.Store(track.ArtHash, track.ArtBytes, track.ArtContentType);
@@ -62,18 +87,25 @@ smtc.TrackChanged += track =>
         // otherwise), resized down first — see PushResizedArtAsync.
         _ = PushResizedArtAsync(track.ArtHash, track.ArtBytes);
     }
-
     _ = clientHub.BroadcastAsync(ToTrackMessage(track));
+}
 
-    var lyricsKey = $"{track.Title}|{track.Artist}";
-    if (lyricsKey != lastLyricsKey)
+// Lookup first, lyrics second: LRCLIB matches far better with the album and
+// duration the lookup may have filled in.
+async Task EnrichThenFetchLyricsAsync(TrackInfo track, string key)
+{
+    if (TrackMetadataProvider.NeedsEnrichment(track) && !metadataProvider.TryGetCached(track, out _))
     {
-        lastLyricsKey = lyricsKey;
-        currentLyrics = null; // clear until the new fetch resolves, so a client
-                               // connecting mid-fetch doesn't get the old song's lyrics
-        _ = FetchAndBroadcastLyricsAsync(track);
+        var enrichment = await metadataProvider.LookupAsync(track);
+        // Drop the result if the user already skipped to another song.
+        if (enrichment is not null && lastLyricsKey == key && currentTrack is { } latest && TrackMetadataProvider.KeyOf(latest) == key)
+        {
+            track = TrackMetadataProvider.Apply(latest, enrichment);
+            PublishTrack(track);
+        }
     }
-};
+    await FetchAndBroadcastLyricsAsync(track, key);
+}
 
 void BroadcastState(PlaybackState state)
 {
@@ -123,10 +155,10 @@ resourceMonitor.SampleAvailable += sample =>
     _ = clientHub.BroadcastAsync(currentResource);
 };
 
-async Task FetchAndBroadcastLyricsAsync(TrackInfo track)
+async Task FetchAndBroadcastLyricsAsync(TrackInfo track, string key)
 {
     var result = await lyricsProvider.TryFetchAsync(track.Title, track.Artist, track.Album, track.DurationMs);
-    if (result is null) return;
+    if (result is null || lastLyricsKey != key) return;
 
     var message = new LyricsMessage(result.Lines, result.Plain);
     currentLyrics = message;
@@ -161,7 +193,7 @@ async Task PushResizedArtAsync(string hash, byte[] originalBytes)
 // minutes. Shared by both transports.
 async Task SendCatchUpAsync(IClientConnection connection, CancellationToken ct)
 {
-    if (smtc.CurrentTrack is { } track)
+    if (smtc.CurrentTrack is not null && currentTrack is { } track)
     {
         await clientHub.SendToAsync(connection, ToTrackMessage(track), ct);
         if (track.ArtBytes is not null && track.ArtHash is not null

@@ -171,7 +171,7 @@ private fun StandbyDisplay(uiState: PanelUiState, onOpenPlayer: () -> Unit, tall
                         modifier = Modifier.basicMarquee(iterations = Int.MAX_VALUE, initialDelayMillis = 1_500, velocity = 40.dp),
                     )
                     DotText(
-                        uiState.artist.uppercase().ifBlank { " " },
+                        listOf(uiState.artist, uiState.album).filter { it.isNotBlank() }.joinToString(" · ").uppercase().ifBlank { " " },
                         14.sp,
                         modifier = Modifier.basicMarquee(iterations = Int.MAX_VALUE, initialDelayMillis = 2_500, velocity = 30.dp),
                     )

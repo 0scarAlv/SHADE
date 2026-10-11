@@ -3,6 +3,7 @@ using System.Text;
 using Shade.Agent.Adb;
 using Shade.Agent.Audio;
 using Shade.Agent.Bluetooth;
+using Shade.Agent.Metadata;
 using Shade.Agent.Smtc;
 using Shade.Agent.Streaming;
 using Shade.Agent.SystemMonitor;
@@ -31,6 +32,7 @@ public sealed class ConsoleDashboard : BackgroundService
     private readonly SpectrumAnalyzer _spectrum;
     private readonly ResourceMonitorService _resources;
     private readonly ClientHub _clients;
+    private readonly TrackMetadataProvider _metadata;
     private readonly AdbReverseWatchdog _adb;
     private readonly RfcommServer _rfcomm;
     private readonly LogBuffer _log;
@@ -55,6 +57,7 @@ public sealed class ConsoleDashboard : BackgroundService
         SpectrumAnalyzer spectrum,
         ResourceMonitorService resources,
         ClientHub clients,
+        TrackMetadataProvider metadata,
         AdbReverseWatchdog adb,
         RfcommServer rfcomm,
         LogBuffer log,
@@ -65,6 +68,7 @@ public sealed class ConsoleDashboard : BackgroundService
         _spectrum = spectrum;
         _resources = resources;
         _clients = clients;
+        _metadata = metadata;
         _adb = adb;
         _rfcomm = rfcomm;
         _log = log;
@@ -337,7 +341,7 @@ public sealed class ConsoleDashboard : BackgroundService
 
     private async Task SeekRelativeAsync(long deltaMs)
     {
-        if (_smtc.CurrentState is not { } state || _smtc.CurrentTrack is not { } track || track.DurationMs <= 0) return;
+        if (_smtc.CurrentState is not { } state || CurrentTrack() is not { } track || track.DurationMs <= 0) return;
         var target = Math.Clamp(CurrentPositionMs(state) + deltaMs, 0, track.DurationMs);
         await _smtc.TrySeekAsync(target);
         Flash($"{(deltaMs > 0 ? "+" : "−")}{Math.Abs(deltaMs) / 1000}s → {FormatMs(target)}");
@@ -439,9 +443,16 @@ public sealed class ConsoleDashboard : BackgroundService
         return new Markup($"[grey]{hints}[/]").Overflow(Overflow.Ellipsis);
     }
 
+    // SMTC's track plus whatever the metadata lookup filled in (album, art,
+    // duration), same as what the phone is shown.
+    private TrackInfo? CurrentTrack() =>
+        _smtc.CurrentTrack is { } track && _metadata.TryGetCached(track, out var extra)
+            ? TrackMetadataProvider.Apply(track, extra)
+            : _smtc.CurrentTrack;
+
     private IRenderable NowPlaying(int inner, bool compact)
     {
-        var track = _smtc.CurrentTrack;
+        var track = CurrentTrack();
         var state = _smtc.CurrentState;
         var rows = new List<IRenderable>();
 

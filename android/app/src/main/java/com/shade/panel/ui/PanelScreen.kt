@@ -191,7 +191,7 @@ private fun PlayerDisplay(uiState: PanelUiState, viewModel: PanelViewModel, lyri
                             stringResource(if (uiState.connection == ConnectionState.CONNECTED) R.string.no_track else R.string.waiting_short)
                         }
                         AnimatedContent(
-                            targetState = title.uppercase() to uiState.artist.uppercase(),
+                            targetState = title.uppercase() to listOf(uiState.artist, uiState.album).filter { it.isNotBlank() }.joinToString(" · ").uppercase(),
                             transitionSpec = {
                                 (fadeIn(tween(300)) + slideInVertically(tween(300)) { it / 3 })
                                     .togetherWith(fadeOut(tween(150)))

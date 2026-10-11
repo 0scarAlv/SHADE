@@ -200,14 +200,23 @@ public sealed class SmtcSessionWatcher : IAsyncDisposable
             var duration = session.GetTimelineProperties().EndTime;
 
             var track = new TrackInfo(
-                Title: props.Title ?? string.Empty,
-                Artist: props.Artist ?? string.Empty,
-                Album: props.AlbumTitle ?? string.Empty,
+                Title: Clean(props.Title),
+                Artist: Clean(props.Artist),
+                Album: Clean(props.AlbumTitle),
                 DurationMs: (long)duration.TotalMilliseconds,
                 ArtBytes: art.Bytes,
                 ArtHash: art.Hash,
                 ArtContentType: art.ContentType,
                 AppName: FriendlyAppName(session.SourceAppUserModelId));
+
+            var key = $"{track.Title}|{track.Artist}";
+            if (key != _estimateKey)
+            {
+                // New song: restart the fallback position counter from zero.
+                _estimateKey = key;
+                _estimateAccumulatedMs = 0;
+                _estimatePlayingSinceMs = CurrentState?.Playing == true ? NowMs() : null;
+            }
 
             CurrentTrack = track;
             TrackChanged?.Invoke(track);
@@ -230,9 +239,13 @@ public sealed class SmtcSessionWatcher : IAsyncDisposable
             var timeline = session.GetTimelineProperties();
             var playing = playback.PlaybackStatus == GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing;
 
+            // Players that publish no timeline at all (EndTime and Position
+            // both zero, e.g. Tauon) would otherwise pin the panel's progress
+            // at 0:00 — fall back to counting played time ourselves.
+            var hasTimeline = timeline.EndTime > TimeSpan.Zero || timeline.Position > TimeSpan.Zero;
             var state = new PlaybackState(
                 Playing: playing,
-                PositionMs: (long)timeline.Position.TotalMilliseconds,
+                PositionMs: hasTimeline ? (long)timeline.Position.TotalMilliseconds : EstimatePosition(playing),
                 TimestampMs: NowMs(),
                 Shuffle: playback.IsShuffleActive,
                 Repeat: playback.AutoRepeatMode switch
@@ -251,6 +264,31 @@ public sealed class SmtcSessionWatcher : IAsyncDisposable
             _logger.LogWarning(ex, "No se pudo leer el estado de reproducción SMTC.");
         }
     }
+
+    // Fallback position counter for timeline-less players (see
+    // RefreshPlaybackState): accumulates time only while playing.
+    private string? _estimateKey;
+    private long _estimateAccumulatedMs;
+    private long? _estimatePlayingSinceMs;
+
+    private long EstimatePosition(bool playing)
+    {
+        var now = NowMs();
+        if (playing && _estimatePlayingSinceMs is null)
+        {
+            _estimatePlayingSinceMs = now;
+        }
+        else if (!playing && _estimatePlayingSinceMs is { } since)
+        {
+            _estimateAccumulatedMs += now - since;
+            _estimatePlayingSinceMs = null;
+        }
+        return _estimateAccumulatedMs + (_estimatePlayingSinceMs is { } start ? now - start : 0);
+    }
+
+    // Some players prefix metadata with a byte-order mark or pad it with
+    // whitespace; both would leak into titles and break lyrics/art lookups.
+    private static string Clean(string? text) => (text ?? string.Empty).Replace("\uFEFF", string.Empty).Trim();
 
     private static async Task<(byte[]? Bytes, string? Hash, string? ContentType)> ReadArtAsync(IRandomAccessStreamReference? thumbnail)
     {
