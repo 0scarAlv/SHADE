@@ -40,17 +40,16 @@ import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
 import kotlin.random.Random
 
-// Opt-in cyberpunk layer over the flat instrument kit (Settings → Pantalla →
-// Modo ciberpunk): text that decodes in from noise, glitch bursts, two-tone
-// neon (the ink plus a saturated counterpart) and a light circling the
-// player's display. Anything that loops only runs while music is playing.
+// Cyberpunk layer over the flat instrument kit (Settings → Pantalla → Modo
+// ciberpunk, on by default): text that lights up letter by letter, glitch
+// bursts and flashes driven by the beat, a hue wheel anchored on the ink and
+// a light circling the player's display. Anything that loops only runs while
+// music is playing.
 
 val CyberWhite = Color(0xFFF4F7FF)
 val CyberCyan = Color(0xFF00F0FF)
 private val FallbackNeon = Color(0xFFFF2BD6)
 
-// Glyphs the Doto face has, so scrambled text keeps its dot-matrix look and width.
-private const val NOISE = "0123456789ABCDEF#$%&*+=<>/\\|?"
 private const val DECODE_MS = 700
 
 @Composable
@@ -63,6 +62,74 @@ fun neonOf(ink: Color): Color {
     android.graphics.Color.colorToHSV(ink.toArgb(), hsv)
     if (hsv[1] < 0.15f) return FallbackNeon
     return Color(android.graphics.Color.HSVToColor(floatArrayOf((hsv[0] + 150f) % 360f, maxOf(hsv[1], 0.75f), maxOf(hsv[2], 0.95f))))
+}
+
+// Ink with its hue rotated, kept vivid; grey inks rotate from magenta.
+fun shiftHue(ink: Color, degrees: Float): Color {
+    val hsv = FloatArray(3)
+    android.graphics.Color.colorToHSV(ink.toArgb(), hsv)
+    if (hsv[1] < 0.15f) { hsv[0] = 300f; hsv[1] = 0.7f }
+    val hue = ((hsv[0] + degrees) % 360f + 360f) % 360f
+    return Color(android.graphics.Color.HSVToColor(floatArrayOf(hue, maxOf(hsv[1], 0.6f), maxOf(hsv[2], 0.9f))))
+}
+
+// 16-step hue wheel starting at the ink (0..300°), for spectra that sweep color across their width.
+fun hueWheel(ink: Color): List<Color> = List(16) { shiftHue(ink, it * 300f / 15f) }
+
+enum class SpectrumStyle {
+    BARS, MIRROR, WAVE;
+
+    companion object {
+        fun fromName(name: String?) = entries.firstOrNull { it.name == name } ?: BARS
+    }
+}
+
+// Beat detection on the agent's spectrum frames: bass-weighted spectral flux
+// against an adaptive threshold (same tuning as Nation). The envelope is
+// computed at read time from the last hit, so nothing ticks between beats.
+@androidx.compose.runtime.Stable
+class BeatState {
+    private var lastHitMs = 0L
+    private var strength = 0f
+    var strongHits by mutableIntStateOf(0)
+        private set
+
+    fun level(nowMs: Long = android.os.SystemClock.uptimeMillis()): Float {
+        if (lastHitMs == 0L) return 0f
+        val v = strength * kotlin.math.exp(-(nowMs - lastHitMs) / 140f)
+        return if (v < 0.02f) 0f else v
+    }
+
+    internal fun hit(s: Float, nowMs: Long) {
+        lastHitMs = nowMs
+        strength = maxOf(level(nowMs), s)
+        if (s > 0.65f) strongHits++
+    }
+}
+
+@Composable
+fun rememberBeat(spectrum: kotlinx.coroutines.flow.StateFlow<FloatArray>, enabled: Boolean): BeatState {
+    val beat = remember { BeatState() }
+    LaunchedEffect(spectrum, enabled) {
+        if (!enabled) return@LaunchedEffect
+        val prev = FloatArray(BAND_COUNT)
+        var avg = 0f
+        var lastBeat = 0L
+        spectrum.collect { bands ->
+            var flux = 0f
+            for (i in 0 until minOf(8, bands.size)) {
+                flux += maxOf(0f, bands[i] - prev[i]) * if (i < 4) 1f else 0.5f
+            }
+            bands.copyInto(prev, endIndex = minOf(bands.size, prev.size))
+            avg += (flux - avg) * 0.08f
+            val now = android.os.SystemClock.uptimeMillis()
+            if (flux > avg * 1.6f + 0.08f && now - lastBeat > 220) {
+                lastBeat = now
+                beat.hit(((flux - avg) / 0.6f).coerceIn(0.35f, 1f), now)
+            }
+        }
+    }
+    return beat
 }
 
 private fun hash(a: Int, b: Int): Int {
@@ -87,9 +154,10 @@ fun rememberFrameClock(running: Boolean): State<Long> {
     return clock
 }
 
-// Dot-matrix text that resolves out of scrambled glyphs whenever `text`
-// changes (each character flashing white as it locks in), with RGB-split
-// glitch bursts: on change when `burst`, and every 5–14 s when `ambient`.
+// Dot-matrix text that lights up letter by letter whenever `text` changes
+// (a dim neon ghost first, then a white flash as each character locks in),
+// with RGB-split glitch bursts: on change when `burst`, on strong beats
+// (`beatHits` changing, at most every 3.5 s) and every 10–20 s when `ambient`.
 @Composable
 fun CyberText(
     text: String,
@@ -99,6 +167,7 @@ fun CyberText(
     maxLines: Int = 1,
     burst: Boolean = true,
     ambient: Boolean = false,
+    beatHits: Int = 0,
 ) {
     val ink = LocalInk.current
     val neon = neonOf(ink)
@@ -117,9 +186,17 @@ fun CyberText(
         glitch = 0
     }
     LaunchedEffect(text) { if (burst) stutter(5) }
+    var lastBeatGlitch by remember { mutableLongStateOf(0L) }
+    LaunchedEffect(beatHits) {
+        val now = android.os.SystemClock.uptimeMillis()
+        if (beatHits > 0 && now - lastBeatGlitch > 3_500) {
+            lastBeatGlitch = now
+            stutter(3)
+        }
+    }
     LaunchedEffect(ambient) {
         while (ambient) {
-            delay(5_000L + Random.nextLong(9_000L))
+            delay(10_000L + Random.nextLong(10_000L))
             stutter(2 + Random.nextInt(4))
         }
     }
@@ -127,16 +204,13 @@ fun CyberText(
     val p = decode.value
     val shown = if (p >= 1f) buildAnnotatedString { append(text) } else buildAnnotatedString {
         val n = (text.length - 1).coerceAtLeast(1)
-        val tick = (p * DECODE_MS / 50).toInt()
         text.forEachIndexed { i, ch ->
             val appearAt = 0.3f * i / n
             val lockAt = minOf(0.93f, 0.15f + 0.55f * i / n + noise01(i, text.hashCode()) * 0.2f)
             when {
                 p >= lockAt -> if (p - lockAt < 0.1f) withStyle(SpanStyle(color = CyberWhite)) { append(ch) } else append(ch)
-                p >= appearAt && ch != ' ' -> withStyle(SpanStyle(color = neon.copy(alpha = 0.8f))) {
-                    append(NOISE[Math.floorMod(hash(i, tick), NOISE.length)])
-                }
-                else -> append(' ')
+                p >= appearAt -> withStyle(SpanStyle(color = neon.copy(alpha = 0.55f))) { append(ch) }
+                else -> withStyle(SpanStyle(color = Color.Transparent)) { append(ch) }
             }
         }
     }
@@ -167,8 +241,20 @@ fun CyberText(
 // Draws a bright packet with a fading neon tail circling the element's
 // rounded border, plus faint CRT scanlines over the content. `phase` (0..1)
 // is read at draw time so the animation never recomposes.
-fun Modifier.cyberDisplay(phase: () -> Float, running: Boolean, head: Color, tail: Color, corner: Dp): Modifier = drawWithContent {
+fun Modifier.cyberDisplay(phase: () -> Float, running: Boolean, head: Color, tail: Color, corner: Dp, beat: () -> Float = { 0f }): Modifier = drawWithContent {
     drawContent()
+    // The whole border flashes with each beat.
+    val flash = beat()
+    if (flash > 0f) {
+        val w = 1.5.dp.toPx()
+        drawRoundRect(
+            color = tail.copy(alpha = flash * 0.85f),
+            topLeft = Offset(w / 2, w / 2),
+            size = androidx.compose.ui.geometry.Size(size.width - w, size.height - w),
+            cornerRadius = CornerRadius(corner.toPx() - w / 2),
+            style = Stroke(w),
+        )
+    }
     val line = 1.dp.toPx()
     var y = 0f
     while (y < size.height) {

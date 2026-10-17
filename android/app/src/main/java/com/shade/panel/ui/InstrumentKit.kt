@@ -44,7 +44,9 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
@@ -377,11 +379,18 @@ private fun angleOf(position: Offset, cx: Float, cy: Float): Float =
 // at display rate between the agent's frames and parks itself once
 // everything has decayed to silence.
 @Composable
-fun BarSpectrum(spectrum: StateFlow<FloatArray>, modifier: Modifier = Modifier, rows: Int = 12) {
+fun BarSpectrum(
+    spectrum: StateFlow<FloatArray>,
+    modifier: Modifier = Modifier,
+    rows: Int = 12,
+    style: SpectrumStyle = SpectrumStyle.BARS,
+    beat: BeatState? = null,
+) {
     val ink = LocalInk.current
-    // Cyberpunk mode: rows fade from the ink into its neon counterpart, peaks burn white, lit cells bloom.
+    // Cyberpunk mode: columns sweep a hue wheel anchored on the ink, rows brighten upward,
+    // peaks burn white, lit cells bloom and everything lifts toward white on each beat.
     val cyber = cyberOn()
-    val neon = neonOf(ink)
+    val wheel = remember(ink) { hueWheel(ink) }
     val bands = remember { FloatArray(BAND_COUNT) }
     val peaks = remember { FloatArray(BAND_COUNT) }
     val peakHold = remember { FloatArray(BAND_COUNT) }
@@ -421,23 +430,65 @@ fun BarSpectrum(spectrum: StateFlow<FloatArray>, modifier: Modifier = Modifier, 
     Canvas(modifier = modifier) {
         @Suppress("UNUSED_EXPRESSION") frameTick
         val columns = BAND_COUNT
+        val lift = if (cyber) (beat?.level() ?: 0f) * 0.35f else 0f
+        fun hue(x: Float) = wheel[(x.coerceIn(0f, 1f) * (wheel.size - 1)).toInt()]
+        fun colorAt(x: Float, t: Float): Color {
+            if (!cyber) return ink
+            val h = hue(x)
+            val c = if (t < 0.7f) androidx.compose.ui.graphics.lerp(h.copy(alpha = 0.75f), h, t / 0.7f)
+            else androidx.compose.ui.graphics.lerp(h, CyberWhite, (t - 0.7f) / 0.3f * 0.35f)
+            return androidx.compose.ui.graphics.lerp(c, CyberWhite, lift)
+        }
+        // Band value at a fractional band index.
+        fun sample(pos: Float): Float {
+            val i = pos.toInt().coerceIn(0, BAND_COUNT - 1)
+            if (i >= BAND_COUNT - 1) return bands[BAND_COUNT - 1]
+            val f = pos - i
+            return bands[i] * (1 - f) + bands[i + 1] * f
+        }
+
+        if (style == SpectrumStyle.WAVE) {
+            // Smooth filled ridge through the bands, hue sweep left to right.
+            val points = 64
+            val path = Path()
+            val fill = Path()
+            for (k in 0..points) {
+                val x = size.width * k / points
+                val y = size.height * (1f - sample(k / points.toFloat() * (BAND_COUNT - 1)).coerceIn(0f, 1f) * 0.95f)
+                if (k == 0) { path.moveTo(x, y); fill.moveTo(0f, size.height); fill.lineTo(x, y) } else { path.lineTo(x, y); fill.lineTo(x, y) }
+            }
+            fill.lineTo(size.width, size.height)
+            fill.close()
+            val colors = if (cyber) wheel.map { androidx.compose.ui.graphics.lerp(it, CyberWhite, lift) } else listOf(ink, ink)
+            drawPath(fill, Brush.horizontalGradient(colors.map { it.copy(alpha = 0.22f) }))
+            drawPath(path, Brush.horizontalGradient(colors), style = Stroke(2.5.dp.toPx(), cap = StrokeCap.Round, join = androidx.compose.ui.graphics.StrokeJoin.Round))
+            return@Canvas
+        }
+
         val gapX = 3.dp.toPx()
         val gapY = 3.dp.toPx()
         val cellW = (size.width - gapX * (columns - 1)) / columns
         val cellH = (size.height - gapY * (rows - 1)) / rows
         val radius = CornerRadius(minOf(cellW, cellH) / 2.5f)
+        val mirror = style == SpectrumStyle.MIRROR
         for (c in 0 until columns) {
-            val lit = (bands[c].coerceIn(0f, 1f) * rows).toInt()
+            val xFrac = c / (columns - 1f)
+            // Mirror: bass in the middle, treble toward both edges, cells grow from the center row.
+            val fromCenter = abs(c - (columns - 1) / 2f) / ((columns - 1) / 2f)
+            val value = if (mirror) sample(fromCenter * (BAND_COUNT - 1)) else bands[c]
+            val lit = (value.coerceIn(0f, 1f) * rows).toInt()
             val peakRow = (peaks[c].coerceIn(0f, 1f) * rows).toInt().coerceAtMost(rows - 1)
             val x = c * (cellW + gapX)
             for (r in 0 until rows) {
                 val y = size.height - (r + 1) * cellH - r * gapY
-                val isPeak = r >= lit && r == peakRow && peaks[c] > 0.04f
-                val on = r < lit || isPeak
+                val isPeak = !mirror && r >= lit && r == peakRow && peaks[c] > 0.04f
+                val dist = abs(r + 0.5f - rows / 2f)
+                val on = if (mirror) dist < lit / 2f else r < lit || isPeak
+                val t = if (mirror) dist / (rows / 2f) else if (rows > 1) r / (rows - 1f) else 1f
                 val litColor = when {
                     !cyber -> ink
                     isPeak -> CyberWhite
-                    else -> androidx.compose.ui.graphics.lerp(ink, neon, if (rows > 1) r / (rows - 1f) else 1f)
+                    else -> colorAt(if (mirror) fromCenter else xFrac, t)
                 }
                 if (cyber && on) {
                     val bloom = 2.dp.toPx()

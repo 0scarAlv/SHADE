@@ -18,6 +18,7 @@ class AppSettings(private val preferences: ShadePreferences) {
     private var clockSecondsState by mutableStateOf(preferences.clockSeconds)
     private var burnInState by mutableStateOf(preferences.burnInProtection)
     private var cyberpunkState by mutableStateOf(preferences.cyberpunk)
+    private var spectrumStyleState by mutableStateOf(SpectrumStyle.fromName(preferences.spectrumStyle))
     private var inkColorState by mutableStateOf(InkColor.fromName(preferences.inkColor))
     private var lyricsOffsetState by mutableStateOf(preferences.lyricsOffsetMs)
 
@@ -68,6 +69,13 @@ class AppSettings(private val preferences: ShadePreferences) {
         set(value) {
             cyberpunkState = value
             preferences.cyberpunk = value
+        }
+
+    var spectrumStyle: SpectrumStyle
+        get() = spectrumStyleState
+        set(value) {
+            spectrumStyleState = value
+            preferences.spectrumStyle = value.name
         }
 }
 

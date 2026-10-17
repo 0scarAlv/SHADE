@@ -163,8 +163,10 @@ private fun ArtFrame(art: Any?, artSize: Dp, onDoubleTap: () -> Unit) {
 @Composable
 private fun PlayerDisplay(uiState: PanelUiState, viewModel: PanelViewModel, lyricsVisible: Boolean, modifier: Modifier) {
     val cyber = cyberOn()
+    val settings = LocalAppSettings.current
     val ink = LocalInk.current
     val runner = rememberFrameClock(cyber && uiState.playing)
+    val beat = rememberBeat(viewModel.spectrum, cyber && uiState.playing)
     val displayModifier = if (cyber) {
         modifier.cyberDisplay(
             phase = { (runner.value % 4_000L) / 4_000f },
@@ -172,6 +174,7 @@ private fun PlayerDisplay(uiState: PanelUiState, viewModel: PanelViewModel, lyri
             head = CyberWhite,
             tail = neonOf(ink),
             corner = 16.dp,
+            beat = { runner.value; beat.level() },
         )
     } else modifier
     DisplayPanel(modifier = displayModifier) {
@@ -217,6 +220,7 @@ private fun PlayerDisplay(uiState: PanelUiState, viewModel: PanelViewModel, lyri
                                         24.sp,
                                         weight = FontWeight.Black,
                                         ambient = uiState.playing,
+                                        beatHits = beat.strongHits,
                                         modifier = Modifier.basicMarquee(iterations = Int.MAX_VALUE, initialDelayMillis = 2_000, velocity = 40.dp),
                                     )
                                     CyberText(
@@ -263,7 +267,16 @@ private fun PlayerDisplay(uiState: PanelUiState, viewModel: PanelViewModel, lyri
                     DotText(if (duration > 0) "-" + formatClock(duration - uiState.positionMs) else "--:--", 11.sp, weight = FontWeight.Medium)
                 }
                 Spacer(Modifier.height(8.dp))
-                BarSpectrum(viewModel.spectrum, modifier = Modifier.fillMaxWidth().weight(1f))
+                // Tap the spectrum to cycle bars → mirror → wave.
+                BarSpectrum(
+                    viewModel.spectrum,
+                    modifier = Modifier.fillMaxWidth().weight(1f).clickableNoRipple {
+                        val styles = SpectrumStyle.entries
+                        settings.spectrumStyle = styles[(settings.spectrumStyle.ordinal + 1) % styles.size]
+                    },
+                    style = settings.spectrumStyle,
+                    beat = beat,
+                )
             }
         }
     }

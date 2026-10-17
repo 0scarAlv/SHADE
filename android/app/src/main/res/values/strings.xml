@@ -108,7 +108,7 @@
     <string name="settings_burn_in">Protección de pantalla</string>
     <string name="settings_burn_in_desc">Mueve el contenido unos píxeles cada minuto para evitar marcas en OLED</string>
     <string name="settings_cyberpunk">Modo ciberpunk</string>
-    <string name="settings_cyberpunk_desc">Texto que se descifra, glitches, neón de dos tonos y una luz recorriendo la pantalla del reproductor</string>
+    <string name="settings_cyberpunk_desc">Texto que se enciende letra por letra, destellos y glitches al ritmo, espectro multicolor y una luz recorriendo la pantalla del reproductor · toca el espectro para cambiar de visualizador</string>
     <string name="settings_section_clock">Reloj</string>
     <string name="settings_clock_seconds">Mostrar segundos</string>
     <string name="settings_clock_seconds_desc">Segundos animados junto a la hora</string>
