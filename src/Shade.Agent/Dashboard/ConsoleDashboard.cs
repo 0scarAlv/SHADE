@@ -20,10 +20,13 @@ namespace Shade.Agent.Dashboard;
 // redirected console, e.g. running as a service) falls back to that.
 public sealed class ConsoleDashboard : BackgroundService
 {
-    private static readonly Color Accent = new(16, 185, 129);
-    private static readonly string AccentHex = "#10b981";
     private const int RefreshMs = 120;
+    // Frame time while the cyber effects animate (playing, decoding, glitching).
+    private const int AnimatedRefreshMs = 40;
     private const int SeekStepMs = 10_000;
+    private const double DecodeTime = 0.7;
+    private static readonly Rgb BorderGrey = Rgb.Hex(0x4E4E4E);
+    private static readonly Rgb TrackGrey = Rgb.Hex(0x3A3A3A);
 
     private static readonly string[] PanelTitles = { "Sonando", "Conexión", "PC", "Registro" };
     private const int PanelNow = 0, PanelConnection = 1, PanelPc = 2, PanelLog = 3;
@@ -52,6 +55,23 @@ public sealed class ConsoleDashboard : BackgroundService
     private string? _flash;
     private DateTimeOffset _flashUntil;
 
+    // Cover colors + cyberpunk mode, mirroring the phone app (1.4.x) and Nation.
+    private readonly System.Diagnostics.Stopwatch _clock = System.Diagnostics.Stopwatch.StartNew();
+    private readonly BeatDetector _beat = new();
+    private DashboardSettings _settings = DashboardSettings.Load();
+    private ArtPalette _palette = ArtPalette.Default;
+    private ArtPalette _targetPalette = ArtPalette.Default;
+    private readonly object _paletteGate = new();
+    private string? _paletteHash;
+    private string? _trackKey;
+    private double _trackChangedAt = double.NegativeInfinity;
+    private double _lastFrameAt;
+    private double _glitchAt, _glitchUntil, _nextGlitch = 8;
+    private int _glitchSeed;
+    private int _seenHardHits;
+    private double _beatLevel;
+    private bool _animating;
+
     public ConsoleDashboard(
         PlaybackRouter smtc,
         SystemVolumeController volume,
@@ -76,7 +96,11 @@ public sealed class ConsoleDashboard : BackgroundService
         _lifetime = lifetime;
         _version = Assembly.GetExecutingAssembly().GetName().Version is { } v ? $"{v.Major}.{v.Minor}.{v.Build}" : "";
 
-        _spectrum.SpectrumAvailable += bands => _bands = bands;
+        _spectrum.SpectrumAvailable += bands =>
+        {
+            _bands = bands;
+            _beat.Feed(bands, Now);
+        };
         _resources.SampleAvailable += sample =>
         {
             lock (_cpuHistory)
@@ -112,6 +136,8 @@ public sealed class ConsoleDashboard : BackgroundService
         output.Flush();
         var lastWidth = -1;
         var lastHeight = -1;
+        var shown = Array.Empty<string>();
+        var frame = new StringBuilder();
         try
         {
             while (!stoppingToken.IsCancellationRequested)
@@ -121,16 +147,31 @@ public sealed class ConsoleDashboard : BackgroundService
                 {
                     lastWidth = width;
                     lastHeight = height;
+                    shown = new string[height];
                     output.Write(ClearScreen);
                 }
 
                 // One column short so a full-width row never triggers the
-                // terminal's auto-wrap; no trailing newline so the last row
-                // never scrolls the buffer.
-                output.Write(CursorHome + RenderAnsi(Math.Max(1, width - 1), height));
-                output.Flush();
+                // terminal's auto-wrap. Only rows that differ from what is
+                // already on screen are rewritten, each positioned absolutely:
+                // the console write is the expensive part of a frame, and
+                // with the cyber effects most frames only touch a few rows.
+                var lines = RenderLines(Math.Max(1, width - 1), height);
+                frame.Clear();
+                for (var row = 0; row < height; row++)
+                {
+                    var line = row < lines.Length ? lines[row] : "";
+                    if (line == shown[row]) continue;
+                    shown[row] = line;
+                    frame.Append("\u001b[").Append(row + 1).Append(";1H").Append(line).Append(ClearToLineEnd);
+                }
+                if (frame.Length > 0)
+                {
+                    output.Write(frame.ToString());
+                    output.Flush();
+                }
 
-                try { await Task.Delay(RefreshMs, stoppingToken); }
+                try { await Task.Delay(_animating ? AnimatedRefreshMs : RefreshMs, stoppingToken); }
                 catch (OperationCanceledException) { break; }
             }
         }
@@ -153,7 +194,6 @@ public sealed class ConsoleDashboard : BackgroundService
     private const string HideCursor = "\u001b[?25l";
     private const string ShowCursor = "\u001b[?25h";
     private const string ClearScreen = "\u001b[2J";
-    private const string CursorHome = "\u001b[H";
     private const string ClearToLineEnd = "\u001b[K";
 
     private static (int Width, int Height) WindowSize()
@@ -169,10 +209,9 @@ public sealed class ConsoleDashboard : BackgroundService
         }
     }
 
-    // Renders one frame to an ANSI string sized exactly to width x height,
-    // with every row ending in "erase to end of line" so nothing from a
-    // wider previous frame survives.
-    private string RenderAnsi(int width, int height)
+    // Renders one frame to ANSI rows, at most `height` of them, each
+    // self-contained (Spectre resets styles at the end of every segment).
+    private string[] RenderLines(int width, int height)
     {
         var writer = new StringWriter();
         var console = AnsiConsole.Create(new AnsiConsoleSettings
@@ -186,8 +225,7 @@ public sealed class ConsoleDashboard : BackgroundService
         console.Profile.Height = height;
         console.Write(Render(width, height));
 
-        var lines = writer.ToString().Replace("\r\n", "\n").TrimEnd('\n').Split('\n');
-        return string.Join(ClearToLineEnd + "\r\n", lines.Take(height)) + ClearToLineEnd;
+        return writer.ToString().Replace("\r\n", "\n").TrimEnd('\n').Split('\n').Take(height).ToArray();
     }
 
     // conhost only interprets ANSI escapes with this mode flag set; Windows
@@ -226,6 +264,8 @@ public sealed class ConsoleDashboard : BackgroundService
         console.Write(Render(width, height));
         return writer.ToString();
     }
+
+    public string RenderColorSnapshot(int width, int height) => string.Join("\n", RenderLines(width, height));
 
     // ---------------------------------------------------------------- input
 
@@ -297,6 +337,17 @@ public sealed class ConsoleDashboard : BackgroundService
             case ConsoleKey.R:
                 await _smtc.TryCycleRepeatAsync();
                 return;
+            case ConsoleKey.F:
+                _settings = _settings with { Cyber = !_settings.Cyber };
+                _settings.Save();
+                if (_settings.Cyber) TriggerGlitch(Now, 0.22);
+                Flash(_settings.Cyber ? "Modo ciberpunk activado" : "Modo ciberpunk desactivado");
+                return;
+            case ConsoleKey.V:
+                _settings = _settings with { Spectrum = (SpectrumStyle)(((int)_settings.Spectrum + 1) % 3) };
+                _settings.Save();
+                Flash($"Visualizador: {SpectrumName(_settings.Spectrum)}");
+                return;
         }
 
         switch (_focus)
@@ -356,8 +407,102 @@ public sealed class ConsoleDashboard : BackgroundService
 
     // ---------------------------------------------------------------- render
 
+    private double Now => _clock.Elapsed.TotalSeconds;
+
+    private string AccentHex => _palette.Accent.Markup;
+
+    private bool Cyber => _settings.Cyber;
+
+    private bool Playing => _smtc.CurrentState?.Playing == true;
+
+    // Advances palette fades, beat, glitch timers and decides the next frame
+    // time: 25 fps only while something is actually moving, else the old 8 fps.
+    private void UpdateFx()
+    {
+        var now = Now;
+        var dt = Math.Clamp(now - _lastFrameAt, 0, 0.5);
+        _lastFrameAt = now;
+        var animating = false;
+
+        var track = CurrentTrack();
+        var key = track is null ? null : $"{track.Title}\u0001{track.Artist}";
+        if (key != _trackKey)
+        {
+            _trackKey = key;
+            _trackChangedAt = now;
+            _beat.Reset();
+            if (key is not null) TriggerGlitch(now, 0.22);
+        }
+
+        // Palette follows the cover the phone is shown; decoding runs off the render loop.
+        var hash = track?.ArtBytes is null ? null : track.ArtHash;
+        if (hash != _paletteHash)
+        {
+            _paletteHash = hash;
+            if (hash is null || track?.ArtBytes is null)
+            {
+                SetTargetPalette(ArtPalette.Default);
+            }
+            else
+            {
+                var bytes = track.ArtBytes;
+                _ = Task.Run(async () =>
+                {
+                    var palette = await ArtPalette.FromCoverAsync(hash, bytes);
+                    if (_paletteHash == hash) SetTargetPalette(palette);
+                });
+            }
+        }
+        ArtPalette target;
+        lock (_paletteGate) target = _targetPalette;
+        if (_palette != target)
+        {
+            var next = ArtPalette.Lerp(_palette, target, 1 - Math.Exp(-dt / 0.25));
+            // Byte steps round to zero near the target; snap once nothing visibly moves.
+            _palette = next == _palette ? target : next;
+            animating = true;
+        }
+
+        _beatLevel = Cyber && Playing ? _beat.Level(now) : 0;
+        if (Cyber)
+        {
+            var hits = _beat.HardHits;
+            if (hits != _seenHardHits)
+            {
+                _seenHardHits = hits;
+                if (Playing) TriggerGlitch(now, 0.1);
+            }
+            // Ambient bursts only while playing; paused stays still.
+            if (Playing && now >= _nextGlitch)
+            {
+                TriggerGlitch(now, 0.08 + Fx.Noise(_glitchSeed, 7) * 0.14);
+                _nextGlitch = now + 10 + Fx.Noise(_glitchSeed, 11) * 10;
+            }
+            animating |= Playing || now < _glitchUntil || now - _trackChangedAt < DecodeTime;
+        }
+        _animating = animating;
+    }
+
+    private void SetTargetPalette(ArtPalette palette)
+    {
+        lock (_paletteGate) _targetPalette = palette;
+    }
+
+    private void TriggerGlitch(double now, double length)
+    {
+        _glitchAt = now;
+        _glitchUntil = now + length;
+        _glitchSeed++;
+    }
+
+    private bool Glitching => Cyber && Now < _glitchUntil;
+
+    // Glitch sub-frame: changes ~25 times a second so a burst stutters instead of sliding.
+    private int GlitchTick => (int)((Now - _glitchAt) * 25) + _glitchSeed * 1000;
+
     private IRenderable Render(int width, int height)
     {
+        UpdateFx();
         if (width < 70 || height < 20)
         {
             return new Panel(new Markup("[grey]Agranda la ventana para ver el panel de Shade.[/]"))
@@ -405,10 +550,22 @@ public sealed class ConsoleDashboard : BackgroundService
         if (index == PanelLog && _logScroll > 0)
             title += $"[grey] ↑{_logScroll} [/]";
 
+        // Cyber mode tints each panel with one cover color and pulses it on the beat.
+        var hue = index switch
+        {
+            PanelNow => _palette.Accent,
+            PanelConnection => _palette.Second,
+            PanelPc => _palette.Third,
+            _ => _palette.Fourth,
+        };
+        var border = focused ? _palette.Accent : Cyber ? Rgb.Lerp(BorderGrey, hue, 0.4) : BorderGrey;
+        if (Cyber && _beatLevel > 0)
+            border = Rgb.Lerp(border, focused ? Fx.White : hue, Math.Round(_beatLevel * 4) / 4 * (focused ? 0.5 : 0.8));
+
         return new Panel(content)
             .Header(title)
             .Border(BoxBorder.Rounded)
-            .BorderColor(focused ? Accent : Color.Grey30)
+            .BorderColor(new Color(border.R, border.G, border.B))
             .Padding(1, 0, 1, 0)
             .Expand();
     }
@@ -417,7 +574,9 @@ public sealed class ConsoleDashboard : BackgroundService
     {
         var uptime = DateTimeOffset.Now - _startedAt;
         var clientCount = _clients.Snapshot().Count;
-        var left = $"[{AccentHex} bold]◆ SHADE[/] [bold]SERVER[/] [grey]{_version}[/]";
+        // The logo flashes toward white on each beat in cyber mode.
+        var logo = Rgb.Lerp(_palette.Accent, Fx.White, _beatLevel * 0.8).Markup;
+        var left = $"[{logo} bold]{(_beatLevel > 0.5 ? "◈" : "◆")} SHADE[/] [bold]SERVER[/] [grey]{_version}[/]";
         var right = $"[grey]ws://127.0.0.1:8080 · activo {(int)uptime.TotalHours}:{uptime.Minutes:00}:{uptime.Seconds:00} · " +
                     $"{clientCount} {(clientCount == 1 ? "cliente" : "clientes")}[/]";
         var grid = new Grid().AddColumn(new GridColumn().NoWrap()).AddColumn(new GridColumn().RightAligned().NoWrap());
@@ -429,7 +588,7 @@ public sealed class ConsoleDashboard : BackgroundService
     private IRenderable Footer(int width)
     {
         if (_flash is not null && DateTimeOffset.Now < _flashUntil)
-            return new Markup($"[{AccentHex}]● {Markup.Escape(_flash)}[/]");
+            return new Markup($"[{AccentHex}]● {Esc(_flash)}[/]");
 
         var context = _focus switch
         {
@@ -439,7 +598,8 @@ public sealed class ConsoleDashboard : BackgroundService
             _ => "",
         };
         var hints = "[white]espacio[/] play/pausa  [white]n/p[/] sig/ant  [white]←/→[/] ±10s  [white]+/-[/] vol  " +
-                    "[white]m[/] mute  [white]s[/] aleatorio  [white]r[/] repetir  [white]tab/1-4[/] panel  " +
+                    "[white]m[/] mute  [white]s[/] aleatorio  [white]r[/] repetir  [white]v[/] visualizador  " +
+                    $"[white]f[/] ciberpunk{(_settings.Cyber ? "" : " (off)")}  [white]tab/1-4[/] panel  " +
                     (context.Length > 0 ? context + "  " : "") + "[white]q[/] salir";
         return new Markup($"[grey]{hints}[/]").Overflow(Overflow.Ellipsis);
     }
@@ -465,9 +625,9 @@ public sealed class ConsoleDashboard : BackgroundService
         }
         else
         {
-            rows.Add(new Markup($"[bold white]{Esc(Truncate(track.Title, inner))}[/]"));
             var subtitle = string.Join(" · ", new[] { track.Artist, track.Album }.Where(s => !string.IsNullOrWhiteSpace(s)));
-            rows.Add(new Markup($"[grey]{Esc(Truncate(subtitle, inner))}[/]"));
+            rows.Add(new Markup(FxText(Truncate(track.Title, inner), inner, Fx.White, bold: true, row: 0)));
+            rows.Add(new Markup(FxText(Truncate(subtitle, inner), inner, Rgb.Hex(0x9E9E9E), bold: false, row: 1)));
             var playing = state?.Playing == true;
             var status = playing ? $"[{AccentHex}]▶ Reproduciendo[/]" : "[yellow]‖ En pausa[/]";
             if (track.AppName is { } app) status += $"[grey] en {Esc(app)}[/]";
@@ -476,8 +636,7 @@ public sealed class ConsoleDashboard : BackgroundService
 
         if (!compact) rows.Add(Text.Empty);
         rows.Add(ProgressLine(track, state, inner));
-        rows.Add(SpectrumLine(inner, state?.Playing == true));
-        if (!compact) rows.Add(Text.Empty);
+        rows.AddRange(Spectrum(inner, compact ? 1 : 3, state?.Playing == true));
         rows.Add(VolumeLine(state, inner));
         return new Rows(rows);
     }
@@ -490,14 +649,33 @@ public sealed class ConsoleDashboard : BackgroundService
         var barWidth = Math.Max(10, inner - times.Length);
         var filled = duration > 0 ? (int)Math.Round(barWidth * (double)position / duration) : 0;
         filled = Math.Clamp(filled, 0, barWidth);
-        return new Markup($"[{AccentHex}]{new string('━', filled)}[/][grey23]{new string('─', barWidth - filled)}[/][grey]{times}[/]");
+        if (!Cyber || filled == 0)
+            return new Markup($"[{AccentHex}]{new string('━', filled)}[/][grey23]{new string('─', barWidth - filled)}[/][grey]{times}[/]");
+
+        // Cyber: the played part runs through the cover colors and the head flashes on the beat.
+        var sb = new StringBuilder();
+        for (var i = 0; i < filled; i++)
+        {
+            var color = i == filled - 1
+                ? Rgb.Lerp(Wheel(i / (double)barWidth), Fx.White, 0.35 + _beatLevel * 0.65)
+                : Wheel(i / (double)barWidth);
+            Append(sb, i == filled - 1 ? (_beatLevel > 0.5 ? '◆' : '◈') : '━', color, false);
+        }
+        return new Markup($"{Flush(sb)}[grey23]{new string('─', barWidth - filled)}[/][grey]{times}[/]");
     }
 
-    // One row of block glyphs (▁…█) following the live FFT bands, with the
-    // same fast-attack / slow-release smoothing as the phone's visualizer.
-    private IRenderable SpectrumLine(int inner, bool playing)
+    private static string SpectrumName(SpectrumStyle style) => style switch
     {
-        const string glyphs = " ▁▂▃▄▅▆▇█";
+        SpectrumStyle.Mirror => "espejo",
+        SpectrumStyle.Wave => "onda",
+        _ => "barras",
+    };
+
+    // The live FFT bands as bars, a mirrored column or a braille wave, with
+    // the same fast-attack / slow-release smoothing as the phone's visualizer.
+    // Colored across the cover palette like the phone's hue-wheel spectrum.
+    private IEnumerable<IRenderable> Spectrum(int inner, int height, bool playing)
+    {
         var source = playing ? _bands : new float[SpectrumAnalyzer.BandCount];
         for (var i = 0; i < _shownBands.Length; i++)
         {
@@ -505,15 +683,186 @@ public sealed class ConsoleDashboard : BackgroundService
             _shownBands[i] += (target - _shownBands[i]) * (target > _shownBands[i] ? 0.8f : 0.35f);
         }
 
-        var perBand = Math.Max(1, Math.Min(3, inner / _shownBands.Length));
-        var sb = new StringBuilder();
-        foreach (var band in _shownBands)
+        var style = height == 1 && _settings.Spectrum == SpectrumStyle.Mirror ? SpectrumStyle.Bars : _settings.Spectrum;
+        var lines = style switch
         {
-            var glyph = glyphs[Math.Clamp((int)Math.Round(band * (glyphs.Length - 1)), 0, glyphs.Length - 1)];
-            sb.Append(glyph, perBand);
+            SpectrumStyle.Mirror => MirrorRows(inner, height, playing),
+            SpectrumStyle.Wave => WaveRows(inner, height, playing),
+            _ => BarRows(inner, height, playing),
+        };
+        return lines.Select(line => (IRenderable)new Markup(line));
+    }
+
+    // Band level under a column, linearly interpolated so any width looks smooth.
+    private float LevelAt(double t)
+    {
+        var x = Math.Clamp(t, 0, 1) * (_shownBands.Length - 1);
+        var a = (int)x;
+        var b = Math.Min(a + 1, _shownBands.Length - 1);
+        return (float)(_shownBands[a] + (_shownBands[b] - _shownBands[a]) * (x - a));
+    }
+
+    private Rgb SpectrumColor(int col, int width, bool playing, double brightness = 1)
+    {
+        if (!playing) return TrackGrey;
+        var color = Cyber ? Wheel(col / (double)Math.Max(1, width - 1)) : _palette.Accent;
+        if (brightness < 1) color = Rgb.Lerp(_palette.Backdrop, color, brightness);
+        return Cyber && _beatLevel > 0 ? Rgb.Lerp(color, Fx.White, _beatLevel * 0.25) : color;
+    }
+
+    private List<string> BarRows(int width, int height, bool playing)
+    {
+        const string glyphs = " ▁▂▃▄▅▆▇█";
+        var rows = new List<string>();
+        for (var r = height - 1; r >= 0; r--)
+        {
+            var sb = new StringBuilder();
+            for (var col = 0; col < width; col++)
+            {
+                var fill = Math.Clamp(LevelAt(col / (double)Math.Max(1, width - 1)) * height - r, 0, 1);
+                var glyph = glyphs[(int)Math.Round(fill * (glyphs.Length - 1))];
+                // Silence still shows a floor line on the bottom row.
+                if (r == 0 && glyph == ' ') glyph = '▁';
+                Append(sb, glyph, SpectrumColor(col, width, playing), false);
+            }
+            rows.Add(Flush(sb));
         }
-        var color = playing ? AccentHex : "grey23";
-        return new Markup($"[{color}]{Esc(sb.ToString())}[/]");
+        return rows;
+    }
+
+    // Grows up and down from the middle row; brighter toward the center.
+    private List<string> MirrorRows(int width, int height, bool playing)
+    {
+        var center = (height - 1) / 2.0;
+        var rows = new List<string>();
+        for (var r = 0; r < height; r++)
+        {
+            var distance = Math.Abs(r - center);
+            var sb = new StringBuilder();
+            for (var col = 0; col < width; col++)
+            {
+                var reach = LevelAt(col / (double)Math.Max(1, width - 1)) * (center + 0.5);
+                var fill = Math.Clamp(reach - distance, 0, 1);
+                var glyph = fill > 0.66 ? '█' : fill > 0.33 ? (r < center ? '▄' : r > center ? '▀' : '■') : distance == 0 ? '─' : ' ';
+                var brightness = 1 - distance / (center + 1) * 0.6;
+                Append(sb, glyph, SpectrumColor(col, width, playing, brightness), false);
+            }
+            rows.Add(Flush(sb));
+        }
+        return rows;
+    }
+
+    // Braille line: each cell is 2x4 dots, so the wave has 4x the vertical resolution.
+    private List<string> WaveRows(int width, int height, bool playing)
+    {
+        int[,] dotBits = { { 0x01, 0x08 }, { 0x02, 0x10 }, { 0x04, 0x20 }, { 0x40, 0x80 } };
+        var dotsHigh = height * 4;
+        var dotsWide = width * 2;
+        var cells = new int[height, width];
+        var prevY = -1;
+        for (var x = 0; x < dotsWide; x++)
+        {
+            var level = LevelAt(x / (double)Math.Max(1, dotsWide - 1));
+            var y = dotsHigh - 1 - (int)Math.Round(level * (dotsHigh - 1));
+            // Join steep steps so the line never breaks into loose dots.
+            var from = prevY < 0 ? y : Math.Min(prevY, y);
+            var to = prevY < 0 ? y : Math.Max(prevY, y);
+            for (var yy = from; yy <= to; yy++)
+                cells[yy / 4, x / 2] |= dotBits[yy % 4, x % 2];
+            prevY = y;
+        }
+
+        var rows = new List<string>();
+        for (var r = 0; r < height; r++)
+        {
+            var sb = new StringBuilder();
+            for (var col = 0; col < width; col++)
+                Append(sb, cells[r, col] == 0 ? ' ' : (char)(0x2800 + cells[r, col]), SpectrumColor(col, width, playing), false);
+            rows.Add(Flush(sb));
+        }
+        return rows;
+    }
+
+    // Accent → Second → Third → Fourth across t in [0, 1].
+    private Rgb Wheel(double t)
+    {
+        Rgb[] stops = { _palette.Accent, _palette.Second, _palette.Third, _palette.Fourth };
+        var x = Math.Clamp(t, 0, 1) * (stops.Length - 1);
+        var a = Math.Min((int)x, stops.Length - 2);
+        return Rgb.Lerp(stops[a], stops[a + 1], x - a);
+    }
+
+    // Text that lights up left to right after a track change (dim ghost, then
+    // a white flash as each character locks in), and tears sideways during a
+    // glitch burst. Plain colored text otherwise.
+    private string FxText(string text, int width, Rgb color, bool bold, int row)
+    {
+        var age = Now - _trackChangedAt;
+        if (!Cyber || (age >= DecodeTime && !Glitching))
+            return $"[{(bold ? "bold " : "")}{color.Markup}]{Esc(text)}[/]";
+
+        var chars = text.ToCharArray();
+        var colors = new Rgb?[chars.Length];
+        var ghost = Rgb.Lerp(_palette.Backdrop, _palette.Second, 0.55);
+        var n = Math.Max(1, chars.Length - 1);
+        var rowDelay = row * 0.05;
+        for (var i = 0; i < chars.Length; i++)
+        {
+            if (age >= DecodeTime) { colors[i] = color; continue; }
+            var appearAt = rowDelay + i / (double)n * 0.2;
+            var lockAt = Math.Min(DecodeTime - 0.05, rowDelay + 0.12 + i / (double)n * 0.35 + Fx.Noise(i, row + _glitchSeed * 7) * 0.15);
+            colors[i] = age >= lockAt ? (age - lockAt < 0.07 ? Fx.White : color) : age >= appearAt ? ghost : null;
+        }
+
+        var shift = 0;
+        if (Glitching)
+        {
+            var tick = GlitchTick;
+            if (Fx.Noise(tick, row) < 0.6) shift = (int)(Fx.Noise(tick, row + 13) * 5) - 2;
+            for (var i = 0; i < chars.Length; i++)
+            {
+                var r = Fx.Noise(tick, i + row * 131);
+                if (colors[i] is null) continue;
+                if (r < 0.06) colors[i] = _palette.Second;
+                else if (r < 0.10) colors[i] = _palette.Fourth;
+            }
+        }
+
+        var sb = new StringBuilder();
+        var cells = Math.Min(width, chars.Length + Math.Max(0, shift));
+        for (var col = 0; col < cells; col++)
+        {
+            var i = col - shift;
+            if (i < 0 || i >= chars.Length || colors[i] is not { } c) Append(sb, ' ', color, false);
+            else Append(sb, chars[i], c, bold);
+        }
+        return Flush(sb);
+    }
+
+    // Run-length markup builder: consecutive cells with the same style share one tag.
+    private string? _runStyle;
+    private readonly StringBuilder _run = new();
+
+    private void Append(StringBuilder sb, char ch, Rgb color, bool bold)
+    {
+        var style = bold ? "bold " + color.Markup : color.Markup;
+        if (style != _runStyle) FlushRun(sb);
+        _runStyle = style;
+        _run.Append(ch);
+    }
+
+    private void FlushRun(StringBuilder sb)
+    {
+        if (_run.Length > 0 && _runStyle is not null)
+            sb.Append('[').Append(_runStyle).Append(']').Append(Esc(_run.ToString())).Append("[/]");
+        _run.Clear();
+        _runStyle = null;
+    }
+
+    private string Flush(StringBuilder sb)
+    {
+        FlushRun(sb);
+        return sb.ToString();
     }
 
     private IRenderable VolumeLine(PlaybackState? state, int inner)
@@ -644,7 +993,7 @@ public sealed class ConsoleDashboard : BackgroundService
 
     // ---------------------------------------------------------------- helpers
 
-    private static string Bar(double fraction, int width)
+    private string Bar(double fraction, int width)
     {
         fraction = Math.Clamp(fraction, 0, 1);
         var filled = (int)Math.Round(width * fraction);

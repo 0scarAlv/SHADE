@@ -276,9 +276,17 @@ if (snapshotPath is not null)
 {
     app.Lifetime.ApplicationStarted.Register(() => _ = Task.Run(async () =>
     {
-        await Task.Delay(4_000);
+        // `--dashboard-snapshot-delay <ms>` lets a player get detected and the cover palette settle first.
+        var delay = int.TryParse(args.SkipWhile(a => a != "--dashboard-snapshot-delay").Skip(1).FirstOrDefault(), out var ms) ? ms : 4_000;
         var dashboard = app.Services.GetRequiredService<ConsoleDashboard>();
+        // The dashboard only notices track changes when it renders: a warm-up
+        // frame lets the decode effect and cover palette finish before the real one.
+        await Task.Delay(Math.Max(0, delay - 2_000));
+        dashboard.RenderSnapshot(120, 34);
+        await Task.Delay(Math.Min(delay, 2_000));
         await File.WriteAllTextAsync(snapshotPath, dashboard.RenderSnapshot(120, 34) + "\n---\n" + dashboard.RenderSnapshot(80, 24));
+        // Same frame with truecolor escapes, to check the cover palette (`type file.ansi` in a terminal).
+        await File.WriteAllTextAsync(snapshotPath + ".ansi", dashboard.RenderColorSnapshot(120, 34));
         app.Lifetime.StopApplication();
     }));
 }
