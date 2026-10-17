@@ -172,7 +172,7 @@ private fun PlayerDisplay(uiState: PanelUiState, viewModel: PanelViewModel, lyri
             phase = { (runner.value % 4_000L) / 4_000f },
             running = uiState.playing,
             head = CyberWhite,
-            tail = neonOf(ink),
+            tail = LocalArtColors.current[1],
             corner = 16.dp,
             beat = { runner.value; beat.level() },
         )

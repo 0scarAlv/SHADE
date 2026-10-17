@@ -387,10 +387,11 @@ fun BarSpectrum(
     beat: BeatState? = null,
 ) {
     val ink = LocalInk.current
-    // Cyberpunk mode: columns sweep a hue wheel anchored on the ink, rows brighten upward,
+    // Cyberpunk mode: columns sweep through the cover's colors, rows brighten upward,
     // peaks burn white, lit cells bloom and everything lifts toward white on each beat.
     val cyber = cyberOn()
-    val wheel = remember(ink) { hueWheel(ink) }
+    val artColors = LocalArtColors.current
+    val wheel = remember(artColors) { coverGradient(artColors) }
     val bands = remember { FloatArray(BAND_COUNT) }
     val peaks = remember { FloatArray(BAND_COUNT) }
     val peakHold = remember { FloatArray(BAND_COUNT) }
@@ -522,8 +523,8 @@ fun SegmentBar(
     cyber: Boolean = false,
     pulse: Boolean = false,
 ) {
-    // Cyberpunk: color → neon gradient, white-hot head segment and (while `pulse`) a light running along the lit part.
-    val neon = neonOf(color)
+    // Cyberpunk: color → cover's second color gradient, white-hot head segment and (while `pulse`) a light running along the lit part.
+    val neon = LocalArtColors.current[1]
     val clock = rememberFrameClock(cyber && pulse)
     var dragFraction by remember { mutableStateOf<Float?>(null) }
     val shown = dragFraction ?: fraction

@@ -21,18 +21,43 @@ import com.shade.panel.ui.theme.PanelAccent
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
-// Two colors pulled from the current cover: a readable accent for controls
-// and a deep tint for the backdrop behind them. Computed by hand instead of
-// pulling in androidx.palette — it's ~40 lines and one less dependency to
-// keep in step with the pinned Kotlin/Coil toolchain.
+// Colors pulled from the current cover, the way most players do it: the
+// accent (controls) is its most prominent colorful color, second..fourth the
+// next dominant distinct ones, all re-lit to read on near-black while keeping
+// their hue and saturation; backdrop is a deep tint. Computed by hand instead
+// of pulling in androidx.palette — one less dependency to keep in step with the
+// pinned Kotlin/Coil toolchain. Same algorithm as Nation's ArtPalette.cs.
 @Immutable
-data class ArtPalette(val accent: Color, val backdrop: Color)
+data class ArtPalette(
+    val accent: Color,
+    val backdrop: Color,
+    val second: Color = accent,
+    val third: Color = accent,
+    val fourth: Color = accent,
+)
 
-val DefaultArtPalette = ArtPalette(accent = PanelAccent, backdrop = Color(0xFF0B1F18))
+val DefaultArtPalette = ArtPalette(
+    accent = PanelAccent,
+    backdrop = Color(0xFF0B1F18),
+    second = Color(0xFF5EB8E0),
+    third = Color(0xFFB7E4C7),
+    fourth = Color(0xFF2E8B6A),
+)
 
-// Black-and-white covers have no hue worth amplifying — fall back to a soft
-// white accent instead of inventing a color.
-private val MonochromeArtPalette = ArtPalette(accent = Color(0xFFE4E4E7), backdrop = Color(0xFF1A1A1E))
+// Nothing usable on the cover (transparent, pure black/white): soft greys
+// instead of inventing a color.
+private val MonochromeArtPalette = ArtPalette(
+    accent = Color(0xFFE4E4E7),
+    backdrop = Color(0xFF1A1A1E),
+    second = Color(0xFFA1A1AA),
+    third = Color(0xFFC8C8CE),
+    fourth = Color(0xFF7A7A84),
+)
+
+// The cover's colors for the cyberpunk effects: [ink, second, third, fourth].
+val LocalArtColors = androidx.compose.runtime.staticCompositionLocalOf {
+    listOf(DefaultArtPalette.accent, DefaultArtPalette.second, DefaultArtPalette.third, DefaultArtPalette.fourth)
+}
 
 @Composable
 fun rememberArtPalette(model: Any?): ArtPalette {
@@ -63,68 +88,123 @@ private suspend fun loadSmallBitmap(context: Context, model: Any): Bitmap? {
     return result.image.toBitmap()
 }
 
-// Hue histogram weighted toward vivid pixels (saturation² × value), smoothed
-// across neighboring buckets so a gradient cover doesn't split its vote. The
-// winning bucket's average color is then re-lit for each role: bright enough
-// to read on near-black for the accent, very dark for the backdrop.
+// k-means over the sampled pixels (seeded from the most common coarse colors),
+// then the most populated clusters that are clearly different from each other.
+// Near-black and near-white clusters are skipped, as androidx.palette does.
 internal fun extractPalette(bitmap: Bitmap): ArtPalette {
     val width = bitmap.width
     val height = bitmap.height
     if (width == 0 || height == 0) return DefaultArtPalette
 
-    val pixels = IntArray(width * height)
-    bitmap.getPixels(pixels, 0, width, 0, 0, width, height)
+    val raw = IntArray(width * height)
+    bitmap.getPixels(raw, 0, width, 0, 0, width, height)
+    val pixels = raw.filter { (it ushr 24) >= 128 }
+    if (pixels.isEmpty()) return MonochromeArtPalette
 
-    val score = FloatArray(HUE_BUCKETS)
-    val red = FloatArray(HUE_BUCKETS)
-    val green = FloatArray(HUE_BUCKETS)
-    val blue = FloatArray(HUE_BUCKETS)
-    val hsv = FloatArray(3)
-
-    for (pixel in pixels) {
-        if ((pixel ushr 24) < 128) continue
-        android.graphics.Color.colorToHSV(pixel, hsv)
-        val saturation = hsv[1]
-        val value = hsv[2]
-        if (value < 0.18f || saturation < 0.22f) continue
-
-        val weight = saturation * saturation * value
-        val bucket = ((hsv[0] / 360f) * HUE_BUCKETS).toInt().coerceIn(0, HUE_BUCKETS - 1)
-        score[bucket] += weight
-        red[bucket] += ((pixel shr 16) and 0xFF) * weight
-        green[bucket] += ((pixel shr 8) and 0xFF) * weight
-        blue[bucket] += (pixel and 0xFF) * weight
+    // Seeds: centers of the most populated 3-bit-per-channel boxes.
+    val boxes = HashMap<Int, Int>()
+    for (p in pixels) {
+        val key = (((p shr 16) and 0xFF) shr 5 shl 6) or (((p shr 8) and 0xFF) shr 5 shl 3) or ((p and 0xFF) shr 5)
+        boxes[key] = (boxes[key] ?: 0) + 1
     }
-
-    var best = -1
-    var bestScore = 0f
-    for (i in 0 until HUE_BUCKETS) {
-        val smoothed = score[i] + 0.5f * score[(i + HUE_BUCKETS - 1) % HUE_BUCKETS] + 0.5f * score[(i + 1) % HUE_BUCKETS]
-        if (smoothed > bestScore) {
-            bestScore = smoothed
-            best = i
+    val centers = boxes.entries.sortedByDescending { it.value }.take(CLUSTERS).map { (key, _) ->
+        floatArrayOf(((key shr 6 and 7) * 32 + 16).toFloat(), ((key shr 3 and 7) * 32 + 16).toFloat(), ((key and 7) * 32 + 16).toFloat())
+    }
+    val k = centers.size
+    val counts = IntArray(k)
+    repeat(ITERATIONS) {
+        val sum = Array(k) { FloatArray(3) }
+        counts.fill(0)
+        for (p in pixels) {
+            val r = ((p shr 16) and 0xFF).toFloat()
+            val g = ((p shr 8) and 0xFF).toFloat()
+            val b = (p and 0xFF).toFloat()
+            var best = 0
+            var bestD = Float.MAX_VALUE
+            for (i in 0 until k) {
+                val d = distance2(centers[i][0], centers[i][1], centers[i][2], r, g, b)
+                if (d < bestD) { bestD = d; best = i }
+            }
+            sum[best][0] += r; sum[best][1] += g; sum[best][2] += b
+            counts[best]++
         }
+        for (i in 0 until k) if (counts[i] > 0) for (c in 0..2) centers[i][c] = sum[i][c] / counts[i]
     }
-    if (best < 0 || score[best] < pixels.size * MIN_VIVID_SHARE) return MonochromeArtPalette
 
-    val total = score[best]
-    val dominant = android.graphics.Color.rgb(
-        (red[best] / total).toInt().coerceIn(0, 255),
-        (green[best] / total).toInt().coerceIn(0, 255),
-        (blue[best] / total).toInt().coerceIn(0, 255),
+    class Pick(val hsl: FloatArray, val count: Int, val rgb: FloatArray)
+    val picked = mutableListOf<Pick>()
+    (0 until k)
+        .filter { counts[it] >= pixels.size * 0.02f }
+        .map { i ->
+            val hsl = FloatArray(3)
+            ColorUtils.RGBToHSL(centers[i][0].toInt(), centers[i][1].toInt(), centers[i][2].toInt(), hsl)
+            Pick(hsl, counts[i], centers[i])
+        }
+        .filter { it.hsl[2] > 0.1f && it.hsl[2] < 0.93f }
+        .sortedByDescending { it.count }
+        .forEach { c ->
+            if (picked.size < 4 && picked.all { distance2(it.rgb[0], it.rgb[1], it.rgb[2], c.rgb[0], c.rgb[1], c.rgb[2]) > MIN_DISTANCE2 }) picked += c
+        }
+    if (picked.isEmpty()) return MonochromeArtPalette
+
+    // Accent = the most prominent *colorful* one; the rest keep population order.
+    val accent = picked.maxBy { it.count * (0.25f + it.hsl[1]) }
+    picked.remove(accent)
+
+    // Greys stay grey; colored ones get enough saturation and lightness to read on black.
+    fun relight(hsl: FloatArray, isAccent: Boolean): Int {
+        val s = if (hsl[1] < 0.12f) hsl[1] else hsl[1].coerceIn(if (isAccent) 0.5f else 0.4f, 0.9f)
+        return ColorUtils.HSLToColor(floatArrayOf(hsl[0], s, hsl[2].coerceIn(if (isAccent) 0.6f else 0.55f, 0.78f)))
+    }
+    val accentColor = relight(accent.hsl, true)
+    val colors = mutableListOf<Int>()
+    // Compared after relighting: dark colors brighten and can land on top of each other.
+    fun tryAdd(c: Int) {
+        if (shownDistance2(c, accentColor) < MIN_SHOWN2 || colors.any { shownDistance2(it, c) < MIN_SHOWN2 }) return
+        colors += c
+    }
+    picked.forEach { tryAdd(relight(it.hsl, false)) }
+    // Fewer distinct colors than slots: lighter, then deeper shades of the accent and the others.
+    val sources = listOf(accent) + picked
+    val shades = floatArrayOf(0.84f, 0.45f, 0.7f, 0.35f)
+    var i = 0
+    while (colors.size < 3 && i < sources.size * shades.size) {
+        val src = sources[i % sources.size].hsl
+        val l = shades[i / sources.size]
+        val s = if (src[1] < 0.12f) src[1] else (src[1] * if (l > 0.6f) 0.75f else 1f).coerceIn(0.3f, 0.85f)
+        tryAdd(ColorUtils.HSLToColor(floatArrayOf(src[0], s, l)))
+        i++
+    }
+    while (colors.size < 3) colors += accentColor // flat single-color cover
+
+    val backdropSat = if (accent.hsl[1] < 0.12f) accent.hsl[1] else accent.hsl[1].coerceIn(0.25f, 0.55f)
+    val backdrop = ColorUtils.HSLToColor(floatArrayOf(accent.hsl[0], backdropSat, 0.13f))
+    return ArtPalette(
+        accent = Color(accentColor),
+        backdrop = Color(backdrop),
+        second = Color(colors[0]),
+        third = Color(colors[1]),
+        fourth = Color(colors[2]),
     )
-
-    val hsl = FloatArray(3)
-    ColorUtils.colorToHSL(dominant, hsl)
-    val hue = hsl[0]
-    val sat = hsl[1]
-
-    val accent = ColorUtils.HSLToColor(floatArrayOf(hue, sat.coerceIn(0.55f, 0.9f), 0.64f))
-    val backdrop = ColorUtils.HSLToColor(floatArrayOf(hue, sat.coerceIn(0.25f, 0.55f), 0.13f))
-    return ArtPalette(accent = Color(accent), backdrop = Color(backdrop))
 }
 
+// Weighted RGB (2/4/3) tracks perceived difference better than plain RGB distance.
+private fun distance2(r1: Float, g1: Float, b1: Float, r2: Float, g2: Float, b2: Float): Float {
+    val dr = r1 - r2
+    val dg = g1 - g2
+    val db = b1 - b2
+    return 2 * dr * dr + 4 * dg * dg + 3 * db * db
+}
+
+private fun shownDistance2(a: Int, b: Int) = distance2(
+    ((a shr 16) and 0xFF).toFloat(), ((a shr 8) and 0xFF).toFloat(), (a and 0xFF).toFloat(),
+    ((b shr 16) and 0xFF).toFloat(), ((b shr 8) and 0xFF).toFloat(), (b and 0xFF).toFloat(),
+)
+
 private const val SAMPLE_SIZE_PX = 64
-private const val HUE_BUCKETS = 36
-private const val MIN_VIVID_SHARE = 0.015f
+private const val CLUSTERS = 8
+private const val ITERATIONS = 8
+// Weighted squared distances: between raw cluster colors, and between final relit colors.
+private const val MIN_DISTANCE2 = 9f * 55f * 55f
+private const val MIN_SHOWN2 = 9f * 28f * 28f
 

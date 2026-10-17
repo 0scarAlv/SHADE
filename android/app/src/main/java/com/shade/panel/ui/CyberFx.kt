@@ -27,7 +27,6 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.lerp
-import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -42,39 +41,23 @@ import kotlin.random.Random
 
 // Cyberpunk layer over the flat instrument kit (Settings → Pantalla → Modo
 // ciberpunk, on by default): text that lights up letter by letter, glitch
-// bursts and flashes driven by the beat, a hue wheel anchored on the ink and
+// bursts and flashes driven by the beat, the cover's own colors and
 // a light circling the player's display. Anything that loops only runs while
 // music is playing.
 
 val CyberWhite = Color(0xFFF4F7FF)
-val CyberCyan = Color(0xFF00F0FF)
-private val FallbackNeon = Color(0xFFFF2BD6)
 
 private const val DECODE_MS = 700
 
 @Composable
 fun cyberOn(): Boolean = LocalAppSettings.current.cyberpunk
 
-// Saturated counterpart of the ink: hue rotated toward magenta/cyan. Grey
-// inks (ICE) have no hue to rotate, so they get a fixed magenta.
-fun neonOf(ink: Color): Color {
-    val hsv = FloatArray(3)
-    android.graphics.Color.colorToHSV(ink.toArgb(), hsv)
-    if (hsv[1] < 0.15f) return FallbackNeon
-    return Color(android.graphics.Color.HSVToColor(floatArrayOf((hsv[0] + 150f) % 360f, maxOf(hsv[1], 0.75f), maxOf(hsv[2], 0.95f))))
+// Gradient running through the cover's four colors, 16 steps, for spectra that sweep color across their width.
+fun coverGradient(colors: List<Color>): List<Color> = List(16) { i ->
+    val t = i / 15f * (colors.size - 1)
+    val a = minOf(t.toInt(), colors.size - 2)
+    lerp(colors[a], colors[a + 1], t - a)
 }
-
-// Ink with its hue rotated, kept vivid; grey inks rotate from magenta.
-fun shiftHue(ink: Color, degrees: Float): Color {
-    val hsv = FloatArray(3)
-    android.graphics.Color.colorToHSV(ink.toArgb(), hsv)
-    if (hsv[1] < 0.15f) { hsv[0] = 300f; hsv[1] = 0.7f }
-    val hue = ((hsv[0] + degrees) % 360f + 360f) % 360f
-    return Color(android.graphics.Color.HSVToColor(floatArrayOf(hue, maxOf(hsv[1], 0.6f), maxOf(hsv[2], 0.9f))))
-}
-
-// 16-step hue wheel starting at the ink (0..300°), for spectra that sweep color across their width.
-fun hueWheel(ink: Color): List<Color> = List(16) { shiftHue(ink, it * 300f / 15f) }
 
 enum class SpectrumStyle {
     BARS, MIRROR, WAVE;
@@ -170,7 +153,8 @@ fun CyberText(
     beatHits: Int = 0,
 ) {
     val ink = LocalInk.current
-    val neon = neonOf(ink)
+    val colors = LocalArtColors.current
+    val neon = colors[1]
     val decode = remember { Animatable(1f) }
     var glitch by remember { mutableIntStateOf(0) }
 
@@ -229,7 +213,7 @@ fun CyberText(
     Box(modifier) {
         if (glitch != 0) {
             val split = (1 + glitch % 3).dp
-            layer(CyberCyan.copy(alpha = 0.7f), -split)
+            layer(colors[3].copy(alpha = 0.7f), -split)
             layer(neon.copy(alpha = 0.7f), split)
             layer(ink, ((glitch / 7) % 5 - 2).dp)
         } else {

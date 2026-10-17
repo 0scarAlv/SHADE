@@ -39,6 +39,7 @@ import com.shade.panel.ui.GestureNavShell
 import com.shade.panel.ui.GestureSettingsScreen
 import com.shade.panel.ui.HomeScreen
 import com.shade.panel.ui.LocalAppSettings
+import com.shade.panel.ui.LocalArtColors
 import com.shade.panel.ui.InkColor
 import com.shade.panel.ui.LocalInk
 import com.shade.panel.ui.PanelViewModel
@@ -71,6 +72,10 @@ class MainActivity : ComponentActivity() {
             // palettes so a track change washes the color over.
             val palette = rememberArtPalette(uiState.art)
             val accent by animateColorAsState(palette.accent, tween(900), label = "accent")
+            val second by animateColorAsState(palette.second, tween(900), label = "second")
+            val third by animateColorAsState(palette.third, tween(900), label = "third")
+            val fourth by animateColorAsState(palette.fourth, tween(900), label = "fourth")
+            val ink = if (settings.inkColor == InkColor.AUTO) accent else settings.inkColor.color
 
             val view = LocalView.current
             DisposableEffect(settings.keepScreenOn) {
@@ -85,7 +90,8 @@ class MainActivity : ComponentActivity() {
 
             CompositionLocalProvider(
                 LocalAppSettings provides settings,
-                LocalInk provides if (settings.inkColor == InkColor.AUTO) accent else settings.inkColor.color,
+                LocalInk provides ink,
+                LocalArtColors provides listOf(ink, second, third, fourth),
             ) {
                 ShadeTheme(accent = accent) {
                     // Without a Surface, LocalContentColor never gets set from the
