@@ -379,6 +379,9 @@ private fun angleOf(position: Offset, cx: Float, cy: Float): Float =
 @Composable
 fun BarSpectrum(spectrum: StateFlow<FloatArray>, modifier: Modifier = Modifier, rows: Int = 12) {
     val ink = LocalInk.current
+    // Cyberpunk mode: rows fade from the ink into its neon counterpart, peaks burn white, lit cells bloom.
+    val cyber = cyberOn()
+    val neon = neonOf(ink)
     val bands = remember { FloatArray(BAND_COUNT) }
     val peaks = remember { FloatArray(BAND_COUNT) }
     val peakHold = remember { FloatArray(BAND_COUNT) }
@@ -429,9 +432,24 @@ fun BarSpectrum(spectrum: StateFlow<FloatArray>, modifier: Modifier = Modifier, 
             val x = c * (cellW + gapX)
             for (r in 0 until rows) {
                 val y = size.height - (r + 1) * cellH - r * gapY
-                val on = r < lit || (r == peakRow && peaks[c] > 0.04f)
+                val isPeak = r >= lit && r == peakRow && peaks[c] > 0.04f
+                val on = r < lit || isPeak
+                val litColor = when {
+                    !cyber -> ink
+                    isPeak -> CyberWhite
+                    else -> androidx.compose.ui.graphics.lerp(ink, neon, if (rows > 1) r / (rows - 1f) else 1f)
+                }
+                if (cyber && on) {
+                    val bloom = 2.dp.toPx()
+                    drawRoundRect(
+                        color = litColor.copy(alpha = 0.18f),
+                        topLeft = Offset(x - bloom, y - bloom),
+                        size = Size(cellW + bloom * 2, cellH + bloom * 2),
+                        cornerRadius = CornerRadius(radius.x + bloom),
+                    )
+                }
                 drawRoundRect(
-                    color = if (on) ink else Color.White.copy(alpha = 0.05f),
+                    color = if (on) litColor else Color.White.copy(alpha = 0.05f),
                     topLeft = Offset(x, y),
                     size = Size(cellW, cellH),
                     cornerRadius = radius,
@@ -450,7 +468,12 @@ fun SegmentBar(
     segments: Int = 48,
     color: Color = LocalInk.current,
     onSeek: ((Float) -> Unit)? = null,
+    cyber: Boolean = false,
+    pulse: Boolean = false,
 ) {
+    // Cyberpunk: color → neon gradient, white-hot head segment and (while `pulse`) a light running along the lit part.
+    val neon = neonOf(color)
+    val clock = rememberFrameClock(cyber && pulse)
     var dragFraction by remember { mutableStateOf<Float?>(null) }
     val shown = dragFraction ?: fraction
     val currentOnSeek by rememberUpdatedState(onSeek)
@@ -477,9 +500,19 @@ fun SegmentBar(
         val segW = (size.width - gap * (segments - 1)) / segments
         val lit = (shown.coerceIn(0f, 1f) * segments).toInt()
         val radius = CornerRadius(minOf(segW, size.height) / 2)
+        val pulseAt = if (cyber && pulse) (clock.value % 2_400L) / 2_400f * (lit + 10) - 5 else Float.NaN
         for (i in 0 until segments) {
+            val litColor = if (!cyber) color else {
+                val base = androidx.compose.ui.graphics.lerp(color, neon, i / (segments - 1f).coerceAtLeast(1f))
+                val d = abs(i - pulseAt)
+                when {
+                    i == lit - 1 -> CyberWhite
+                    d < 3f -> androidx.compose.ui.graphics.lerp(base, CyberWhite, (1 - d / 3f) * 0.7f)
+                    else -> base
+                }
+            }
             drawRoundRect(
-                color = if (i < lit) color else Color.White.copy(alpha = 0.07f),
+                color = if (i < lit) litColor else Color.White.copy(alpha = 0.07f),
                 topLeft = Offset(i * (segW + gap), 0f),
                 size = Size(segW, size.height),
                 cornerRadius = radius,

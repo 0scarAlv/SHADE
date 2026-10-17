@@ -45,6 +45,11 @@ class ShadePreferences(context: Context) {
         get() = prefs.getBoolean(KEY_BURN_IN, true)
         set(value) = prefs.edit { putBoolean(KEY_BURN_IN, value) }
 
+    // Opt-in cyberpunk effects on the player (decode-in text, glitch, neon).
+    var cyberpunk: Boolean
+        get() = prefs.getBoolean(KEY_CYBERPUNK, false)
+        set(value) = prefs.edit { putBoolean(KEY_CYBERPUNK, value) }
+
     // Accent ink for the UI (see InkColor). Key name predates the rename.
     var inkColor: String
         get() = prefs.getString(KEY_VFD_COLOR, null) ?: "CYAN"
@@ -99,6 +104,7 @@ class ShadePreferences(context: Context) {
         const val KEY_IMMERSIVE = "immersive"
         const val KEY_CLOCK_SECONDS = "clock_seconds"
         const val KEY_BURN_IN = "burn_in_protection"
+        const val KEY_CYBERPUNK = "cyberpunk"
         const val KEY_VFD_COLOR = "vfd_color"
         const val KEY_LYRICS_OFFSET = "lyrics_offset_ms"
         const val KEY_SWIPE_RIGHT = "swipe_right"

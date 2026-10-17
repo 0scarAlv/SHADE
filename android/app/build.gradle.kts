@@ -23,8 +23,8 @@ android {
         applicationId = "com.shade.panel"
         minSdk = 26
         targetSdk = 36
-        versionCode = 9
-        versionName = "1.4.0"
+        versionCode = 10
+        versionName = "1.4.1"
     }
 
     signingConfigs {

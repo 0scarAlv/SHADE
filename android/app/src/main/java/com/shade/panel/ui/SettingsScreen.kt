@@ -107,6 +107,10 @@ fun SettingsScreen(onBack: () -> Unit) {
             SwitchRow(stringResource(R.string.settings_burn_in), stringResource(R.string.settings_burn_in_desc), settings.burnInProtection) {
                 settings.burnInProtection = it
             }
+            RowDivider()
+            SwitchRow(stringResource(R.string.settings_cyberpunk), stringResource(R.string.settings_cyberpunk_desc), settings.cyberpunk) {
+                settings.cyberpunk = it
+            }
         }
         Section(stringResource(R.string.settings_section_clock)) {
             SwitchRow(stringResource(R.string.settings_clock_seconds), stringResource(R.string.settings_clock_seconds_desc), settings.clockSeconds) {

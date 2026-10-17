@@ -162,7 +162,19 @@ private fun ArtFrame(art: Any?, artSize: Dp, onDoubleTap: () -> Unit) {
 
 @Composable
 private fun PlayerDisplay(uiState: PanelUiState, viewModel: PanelViewModel, lyricsVisible: Boolean, modifier: Modifier) {
-    DisplayPanel(modifier = modifier) {
+    val cyber = cyberOn()
+    val ink = LocalInk.current
+    val runner = rememberFrameClock(cyber && uiState.playing)
+    val displayModifier = if (cyber) {
+        modifier.cyberDisplay(
+            phase = { (runner.value % 4_000L) / 4_000f },
+            running = uiState.playing,
+            head = CyberWhite,
+            tail = neonOf(ink),
+            corner = 16.dp,
+        )
+    } else modifier
+    DisplayPanel(modifier = displayModifier) {
         Column(Modifier.fillMaxSize()) {
             // Indicator row: source, transport state, mode annunciators.
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
@@ -181,7 +193,7 @@ private fun PlayerDisplay(uiState: PanelUiState, viewModel: PanelViewModel, lyri
             Spacer(Modifier.height(10.dp))
 
             if (lyricsVisible) {
-                LyricsReadout(uiState.lyricsLines, uiState.currentLyricsIndex, Modifier.fillMaxWidth().weight(1f))
+                LyricsReadout(uiState.lyricsLines, uiState.currentLyricsIndex, Modifier.fillMaxWidth().weight(1f), cyber)
             } else {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Readout(text = formatClock(uiState.positionMs), size = 40.sp, template = "88:88", lit = uiState.hasTrack)
@@ -198,6 +210,25 @@ private fun PlayerDisplay(uiState: PanelUiState, viewModel: PanelViewModel, lyri
                             },
                             label = "displayTitle",
                         ) { (shownTitle, shownArtist) ->
+                            if (cyber) {
+                                Column {
+                                    CyberText(
+                                        shownTitle,
+                                        24.sp,
+                                        weight = FontWeight.Black,
+                                        ambient = uiState.playing,
+                                        modifier = Modifier.basicMarquee(iterations = Int.MAX_VALUE, initialDelayMillis = 2_000, velocity = 40.dp),
+                                    )
+                                    CyberText(
+                                        shownArtist.ifBlank { " " },
+                                        15.sp,
+                                        weight = FontWeight.Bold,
+                                        ambient = uiState.playing,
+                                        modifier = Modifier.basicMarquee(iterations = Int.MAX_VALUE, initialDelayMillis = 3_000, velocity = 30.dp),
+                                    )
+                                }
+                                return@AnimatedContent
+                            }
                             Column {
                                 DotText(
                                     shownTitle,
@@ -222,6 +253,8 @@ private fun PlayerDisplay(uiState: PanelUiState, viewModel: PanelViewModel, lyri
                     segments = 60,
                     modifier = Modifier.fillMaxWidth().height(9.dp),
                     onSeek = if (duration > 0) { f -> viewModel.seek((f * duration).toLong()) } else null,
+                    cyber = cyber,
+                    pulse = uiState.playing,
                 )
                 Spacer(Modifier.height(4.dp))
                 Row(Modifier.fillMaxWidth()) {
@@ -239,7 +272,7 @@ private fun PlayerDisplay(uiState: PanelUiState, viewModel: PanelViewModel, lyri
 // Karaoke on the display: previous line dim above, current line bright and
 // large, next line dim below — the whole block rolls up on each change.
 @Composable
-private fun LyricsReadout(lines: List<LyricsLine>, currentIndex: Int, modifier: Modifier) {
+private fun LyricsReadout(lines: List<LyricsLine>, currentIndex: Int, modifier: Modifier, cyber: Boolean) {
     Box(modifier = modifier, contentAlignment = Alignment.Center) {
         if (lines.isEmpty()) {
             DotText(stringResource(R.string.no_lyrics_available).uppercase(), 18.sp)
@@ -257,12 +290,12 @@ private fun LyricsReadout(lines: List<LyricsLine>, currentIndex: Int, modifier: 
             Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
                 DotText(lines.getOrNull(i - 1)?.text.orEmpty().ifBlank { " " }, 14.sp, lit = false, maxLines = 1)
                 Spacer(Modifier.height(6.dp))
-                DotText(
-                    (lines.getOrNull(i)?.text ?: "♪").ifBlank { "♪" },
-                    24.sp,
-                    weight = FontWeight.Black,
-                    maxLines = 2,
-                )
+                val current = (lines.getOrNull(i)?.text ?: "♪").ifBlank { "♪" }
+                if (cyber) {
+                    CyberText(current, 24.sp, weight = FontWeight.Black, maxLines = 2, burst = false)
+                } else {
+                    DotText(current, 24.sp, weight = FontWeight.Black, maxLines = 2)
+                }
                 Spacer(Modifier.height(6.dp))
                 DotText(lines.getOrNull(i + 1)?.text.orEmpty().ifBlank { " " }, 14.sp, lit = false, maxLines = 1)
             }
