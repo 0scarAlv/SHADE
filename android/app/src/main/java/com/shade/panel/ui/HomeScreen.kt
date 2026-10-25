@@ -99,7 +99,7 @@ fun HomeScreen(
                 .padding(horizontal = 24.dp, vertical = 18.dp),
         ) {
             val landscape = maxWidth > maxHeight
-            val selectors = selectorModels(uiState, onOpenPanel, onOpenConnection, onOpenGestureSettings, onOpenSettings, onOpenMusic)
+            val selectors = selectorModels(uiState, onOpenPanel, onOpenConnection, onOpenGestureSettings, onOpenSettings)
 
             Column(
                 modifier = Modifier
@@ -107,12 +107,15 @@ fun HomeScreen(
                     .nestedScroll(nestedScrollConnection)
                     .verticalScroll(rememberScrollState()),
             ) {
-                TopStrip(model = "SP-1 · Standby") {
+                TopStrip(model = "SP-1 · Deck") {
                     StatusDot(
                         label = if (uiState.transport == Transport.BLUETOOTH) "BT" else "USB",
                         on = uiState.connection == ConnectionState.CONNECTED,
                         color = if (uiState.connection == ConnectionState.CONNECTED) LocalInk.current else Color(0xFFFF4B3E),
                     )
+                    Spacer(Modifier.width(14.dp))
+                    // Back to the phone's own player — the way in, mirrored.
+                    SlideKey("MÚSICA", onSlide = onOpenMusic, towardsStart = true)
                 }
                 Spacer(Modifier.height(16.dp))
                 StandbyDisplay(uiState, onOpenPlayer = { onOpenPanel(NavScreen.PLAYER) }, tall = !landscape)
@@ -216,7 +219,6 @@ private fun selectorModels(
     onOpenConnection: () -> Unit,
     onOpenGestureSettings: () -> Unit,
     onOpenSettings: () -> Unit,
-    onOpenMusic: () -> Unit,
 ): List<SelectorModel> {
     val resource = uiState.resource
     val cpu = resource?.cpuUsagePercent?.roundToInt()
@@ -229,8 +231,6 @@ private fun selectorModels(
             onOpenPanel(NavScreen.STATS)
         },
         SelectorModel(stringResource(R.string.tile_clock), "CLK", "TIME", false, null) { onOpenPanel(NavScreen.CLOCK) },
-        // The phone's own files, not the PC: its own player and listening journal.
-        SelectorModel(stringResource(R.string.tile_music), "MUS", "LOCAL", false, null, onOpenMusic),
         SelectorModel(
             stringResource(R.string.tile_connection),
             "LINK",

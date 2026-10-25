@@ -285,7 +285,7 @@ private fun PlayerDisplay(uiState: PanelUiState, viewModel: PanelViewModel, lyri
 // Karaoke on the display: previous line dim above, current line bright and
 // large, next line dim below — the whole block rolls up on each change.
 @Composable
-private fun LyricsReadout(lines: List<LyricsLine>, currentIndex: Int, modifier: Modifier, cyber: Boolean) {
+internal fun LyricsReadout(lines: List<LyricsLine>, currentIndex: Int, modifier: Modifier, cyber: Boolean) {
     Box(modifier = modifier, contentAlignment = Alignment.Center) {
         if (lines.isEmpty()) {
             DotText(stringResource(R.string.no_lyrics_available).uppercase(), 18.sp)

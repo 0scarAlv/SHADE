@@ -104,7 +104,8 @@ class PlaybackService : MediaSessionService() {
     }
 }
 
-fun Song.toMediaItem(): MediaItem = MediaItem.Builder()
+/** [queued]: added by hand to play next — the UI lists these as "la cola". */
+fun Song.toMediaItem(queued: Boolean = false): MediaItem = MediaItem.Builder()
     .setMediaId(id.toString())
     .setUri(uri)
     .setMediaMetadata(
@@ -115,7 +116,11 @@ fun Song.toMediaItem(): MediaItem = MediaItem.Builder()
             .setGenre(genre)
             .setArtworkUri(artUri)
             .setDurationMs(durationMs)
-            .setExtras(bundleOf(ListenRecorder.EXTRA_ISRC to isrc, ListenRecorder.EXTRA_PATH to path))
+            .setExtras(bundleOf(ListenRecorder.EXTRA_ISRC to isrc, ListenRecorder.EXTRA_PATH to path, EXTRA_QUEUED to queued))
             .build(),
     )
     .build()
+
+private const val EXTRA_QUEUED = "shade.queued"
+
+val MediaItem.isQueued: Boolean get() = mediaMetadata.extras?.getBoolean(EXTRA_QUEUED) == true

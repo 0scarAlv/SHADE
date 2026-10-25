@@ -2,25 +2,28 @@ package com.shade.panel.music
 
 import android.app.Application
 import android.content.ComponentName
+import android.content.Context
 import android.net.Uri
+import android.util.LruCache
+import androidx.core.content.edit
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import com.google.common.util.concurrent.ListenableFuture
 import com.google.common.util.concurrent.MoreExecutors
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 data class NowPlaying(
     val mediaId: String? = null,
@@ -37,35 +40,50 @@ data class NowPlaying(
     val hasTrack get() = mediaId != null
 }
 
-// The Música screen's side of the player: talks to PlaybackService through a
+/** One upcoming item of the player's list; [queued] = added by hand ("a la cola"). */
+data class QueueEntry(
+    val index: Int,
+    val mediaId: String,
+    val title: String,
+    val artist: String,
+    val artUri: Uri?,
+    val queued: Boolean,
+)
+
+// The music player's side of playback: talks to PlaybackService through a
 // MediaController, so playback lives in the service and survives the screen.
+//
+// Shuffle is done here, not with ExoPlayer's shuffle mode: the list itself is
+// reordered, so "add to queue" can always mean "right after the current song
+// and whatever was queued before it", shuffled or not.
 class MusicViewModel(app: Application) : AndroidViewModel(app) {
     private val library = MusicLibrary.get(app)
     val songs: StateFlow<List<Song>> = library.songs
     val loading: StateFlow<Boolean> = library.loading
 
-    private val _query = MutableStateFlow("")
-    val query: StateFlow<String> = _query.asStateFlow()
+    private val prefs = app.getSharedPreferences("shade_music", Context.MODE_PRIVATE)
+    private var shuffle = prefs.getBoolean(KEY_SHUFFLE, false)
 
-    // Search narrows what's on screen only; playing a result still queues the whole library.
-    val shown: StateFlow<List<Song>> = combine(songs, _query) { all, q ->
-        val words = fold(q).split(' ').filter { it.isNotBlank() }
-        if (words.isEmpty()) all else all.filter { s -> words.all { s.searchKey.contains(it) } }
-    }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
-
-    private val _now = MutableStateFlow(NowPlaying())
+    private val _now = MutableStateFlow(NowPlaying(shuffle = shuffle))
     val now: StateFlow<NowPlaying> = _now.asStateFlow()
+
+    private val _upNext = MutableStateFlow<List<QueueEntry>>(emptyList())
+    val upNext: StateFlow<List<QueueEntry>> = _upNext.asStateFlow()
+
+    private val _lyrics = MutableStateFlow(Lyrics.NONE)
+    val lyrics: StateFlow<Lyrics> = _lyrics.asStateFlow()
+    private val lyricsCache = LruCache<String, Lyrics>(24)
+    private var lyricsFor: String? = null
 
     private var controllerFuture: ListenableFuture<MediaController>? = null
     private var controller: MediaController? = null
     private var ticker: Job? = null
 
     private val listener = object : Player.Listener {
-        override fun onEvents(player: Player, events: Player.Events) = publish(player)
-    }
-
-    fun setQuery(q: String) {
-        _query.value = q
+        override fun onEvents(player: Player, events: Player.Events) {
+            publish(player)
+            if (events.containsAny(Player.EVENT_TIMELINE_CHANGED, Player.EVENT_MEDIA_ITEM_TRANSITION)) publishQueue(player)
+        }
     }
 
     /** Call once the audio permission is granted. */
@@ -78,8 +96,11 @@ class MusicViewModel(app: Application) : AndroidViewModel(app) {
             future.addListener({
                 val c = runCatching { future.get() }.getOrNull() ?: return@addListener
                 controller = c
+                // An older build used ExoPlayer's shuffle; ours lives in the list order.
+                c.shuffleModeEnabled = false
                 c.addListener(listener)
                 publish(c)
+                publishQueue(c)
             }, MoreExecutors.directExecutor())
         }
     }
@@ -88,22 +109,57 @@ class MusicViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch { library.refresh() }
     }
 
+    /** Plays [song] with the library around it; what was queued by hand stays next. */
     fun play(song: Song) {
         val c = controller ?: return
+        val queued = queuedAfterCurrent(c)
         val all = songs.value
-        val index = all.indexOfFirst { it.id == song.id }.coerceAtLeast(0)
-        c.setMediaItems(all.map { it.toMediaItem() }, index, 0)
+        val items = ArrayList<MediaItem>(all.size + queued.size)
+        val start: Int
+        if (shuffle) {
+            items += song.toMediaItem()
+            items += queued
+            items += all.filter { it.id != song.id }.shuffled().map { it.toMediaItem() }
+            start = 0
+        } else {
+            val at = all.indexOfFirst { it.id == song.id }.coerceAtLeast(0)
+            all.subList(0, at).mapTo(items) { it.toMediaItem() }
+            items += song.toMediaItem()
+            items += queued
+            all.subList((at + 1).coerceAtMost(all.size), all.size).mapTo(items) { it.toMediaItem() }
+            start = at
+        }
+        c.setMediaItems(items, start, 0)
         c.prepare()
         c.play()
     }
 
     fun shuffleAll() {
-        val c = controller ?: return
         val all = songs.value
         if (all.isEmpty()) return
-        c.shuffleModeEnabled = true
-        c.setMediaItems(all.map { it.toMediaItem() }, all.indices.random(), 0)
-        c.prepare()
+        setShuffle(true, rebuild = false)
+        play(all.random())
+    }
+
+    /** Swipe-left on a song: plays after the current one and anything queued before. */
+    fun addToQueue(song: Song) {
+        val c = controller ?: return
+        if (c.mediaItemCount == 0 || c.currentMediaItem == null) {
+            play(song)
+            return
+        }
+        val at = c.currentMediaItemIndex + 1 + queuedAfterCurrent(c).size
+        c.addMediaItem(at.coerceAtMost(c.mediaItemCount), song.toMediaItem(queued = true))
+    }
+
+    fun removeAt(index: Int) {
+        controller?.takeIf { index in 0 until it.mediaItemCount && index != it.currentMediaItemIndex }?.removeMediaItem(index)
+    }
+
+    fun jumpTo(index: Int) {
+        val c = controller ?: return
+        if (index !in 0 until c.mediaItemCount) return
+        c.seekTo(index, 0)
         c.play()
     }
 
@@ -111,8 +167,13 @@ class MusicViewModel(app: Application) : AndroidViewModel(app) {
         val c = controller ?: return
         if (c.isPlaying) c.pause() else {
             if (c.playbackState == Player.STATE_IDLE) c.prepare()
+            if (c.playbackState == Player.STATE_ENDED) c.seekToDefaultPosition(0)
             c.play()
         }
+    }
+
+    fun pause() {
+        controller?.pause()
     }
 
     fun next() { controller?.seekToNextMediaItem() }
@@ -125,9 +186,7 @@ class MusicViewModel(app: Application) : AndroidViewModel(app) {
         if (c.duration > 0) c.seekTo((c.duration * fraction.coerceIn(0f, 1f)).toLong())
     }
 
-    fun toggleShuffle() {
-        controller?.let { it.shuffleModeEnabled = !it.shuffleModeEnabled }
-    }
+    fun toggleShuffle() = setShuffle(!shuffle, rebuild = true)
 
     fun cycleRepeat() {
         controller?.let {
@@ -137,6 +196,44 @@ class MusicViewModel(app: Application) : AndroidViewModel(app) {
                 else -> Player.REPEAT_MODE_OFF
             }
         }
+    }
+
+    // Reorders everything but the current song (which keeps playing untouched)
+    // and the hand-queued songs right after it.
+    private fun setShuffle(on: Boolean, rebuild: Boolean) {
+        shuffle = on
+        prefs.edit { putBoolean(KEY_SHUFFLE, on) }
+        _now.update { it.copy(shuffle = on) }
+        val c = controller ?: return
+        if (!rebuild || c.currentMediaItem == null) return
+        val currentId = c.currentMediaItem?.mediaId?.toLongOrNull()
+        val queued = queuedAfterCurrent(c)
+        val all = songs.value
+        val cur = c.currentMediaItemIndex
+        if (cur + 1 < c.mediaItemCount) c.removeMediaItems(cur + 1, c.mediaItemCount)
+        if (cur > 0) c.removeMediaItems(0, cur)
+        if (on) {
+            c.addMediaItems(1, queued + all.filter { it.id != currentId }.shuffled().map { it.toMediaItem() })
+        } else {
+            val at = all.indexOfFirst { it.id == currentId }
+            if (at < 0) {
+                c.addMediaItems(1, queued + all.map { it.toMediaItem() })
+            } else {
+                c.addMediaItems(1, queued + all.subList(at + 1, all.size).map { it.toMediaItem() })
+                c.addMediaItems(0, all.subList(0, at).map { it.toMediaItem() })
+            }
+        }
+    }
+
+    private fun queuedAfterCurrent(p: Player): List<MediaItem> {
+        if (p.currentMediaItem == null) return emptyList()
+        val out = ArrayList<MediaItem>()
+        for (i in p.currentMediaItemIndex + 1 until p.mediaItemCount) {
+            val item = p.getMediaItemAt(i)
+            if (!item.isQueued) break
+            out += item
+        }
+        return out
     }
 
     private fun publish(p: Player) {
@@ -152,18 +249,57 @@ class MusicViewModel(app: Application) : AndroidViewModel(app) {
                 playing = p.isPlaying,
                 positionMs = p.currentPosition.coerceAtLeast(0),
                 durationMs = p.duration.takeIf { it > 0 } ?: (m?.durationMs ?: 0),
-                shuffle = p.shuffleModeEnabled,
+                shuffle = shuffle,
                 repeatMode = p.repeatMode,
             )
         }
-        // The position only needs polling while it moves.
+        loadLyrics(item?.mediaId)
+        // The position only needs polling while it moves; 250 ms keeps lyric lines on time.
         if (p.isPlaying && ticker?.isActive != true) {
             ticker = viewModelScope.launch {
                 while (isActive && controller?.isPlaying == true) {
                     controller?.let { c -> _now.update { it.copy(positionMs = c.currentPosition.coerceAtLeast(0)) } }
-                    delay(500)
+                    delay(250)
                 }
             }
+        }
+    }
+
+    private fun publishQueue(p: Player) {
+        if (p.currentMediaItem == null) {
+            _upNext.value = emptyList()
+            return
+        }
+        val from = p.currentMediaItemIndex + 1
+        val to = minOf(p.mediaItemCount, from + MAX_UP_NEXT)
+        _upNext.value = (from until to).map { i ->
+            val item = p.getMediaItemAt(i)
+            val m = item.mediaMetadata
+            QueueEntry(i, item.mediaId, m.title?.toString() ?: "", m.artist?.toString() ?: "", m.artworkUri, item.isQueued)
+        }
+    }
+
+    private fun loadLyrics(mediaId: String?) {
+        if (mediaId == lyricsFor) return
+        lyricsFor = mediaId
+        if (mediaId == null) {
+            _lyrics.value = Lyrics.NONE
+            return
+        }
+        lyricsCache.get(mediaId)?.let {
+            _lyrics.value = it
+            return
+        }
+        _lyrics.value = Lyrics.NONE
+        viewModelScope.launch {
+            val app = getApplication<Application>()
+            val found = withContext(Dispatchers.IO) {
+                runCatching {
+                    app.contentResolver.openInputStream(PlaybackService.contentUri(mediaId))?.use { TagReader.readLyrics(it) }
+                }.getOrNull().let(Lyrics::parse)
+            }
+            lyricsCache.put(mediaId, found)
+            if (lyricsFor == mediaId) _lyrics.value = found
         }
     }
 
@@ -171,5 +307,10 @@ class MusicViewModel(app: Application) : AndroidViewModel(app) {
         controller?.removeListener(listener)
         controllerFuture?.let { MediaController.releaseFuture(it) }
         super.onCleared()
+    }
+
+    private companion object {
+        const val KEY_SHUFFLE = "shuffle"
+        const val MAX_UP_NEXT = 300
     }
 }

@@ -8,7 +8,8 @@ import java.io.InputStream
 // Reads ISRC and GENRE from a file's Vorbis comments — FLAC's VORBIS_COMMENT
 // block or an Ogg stream's OpusTags/Vorbis comment packet. MediaStore has the
 // genre but not the ISRC, and the ISRC is what lets the phone and Nation agree
-// on which song is which. Other formats (m4a) return nothing.
+// on which song is which. Lyrics come from the same block, read on demand for
+// the playing song only. Other formats (m4a) return nothing.
 object TagReader {
     /** Bumped whenever parsing changes, so the library re-reads tags cached by an older reader. */
     const val VERSION = 2
@@ -19,6 +20,30 @@ object TagReader {
     private const val MAX_COMMENT_BYTES = 12 * 1024 * 1024
 
     fun read(stream: InputStream): Tags? {
+        val (data, start) = commentBlock(stream) ?: return null
+        var isrc: String? = null
+        var genre: String? = null
+        // Only short fields matter; don't decode the base64 cover as a string.
+        forEachComment(data, start, maxLength = 512) { key, value ->
+            if (key == "ISRC" && isrc == null) isrc = value.uppercase()
+            if (key == "GENRE" && genre == null) genre = value
+        }
+        return Tags(isrc, genre)
+    }
+
+    /** The embedded lyrics (LRC or plain text), preferring a synced field. */
+    fun readLyrics(stream: InputStream): String? {
+        val (data, start) = commentBlock(stream) ?: return null
+        val found = HashMap<String, String>()
+        forEachComment(data, start, maxLength = 256 * 1024) { key, value ->
+            if (key in LYRICS_KEYS && key !in found) found[key] = value
+        }
+        return LYRICS_KEYS.firstNotNullOfOrNull { found[it] }
+    }
+
+    private val LYRICS_KEYS = listOf("SYNCEDLYRICS", "LYRICS", "UNSYNCEDLYRICS", "UNSYNCED LYRICS")
+
+    private fun commentBlock(stream: InputStream): Pair<ByteArray, Int>? {
         val input = DataInputStream(stream.buffered(64 * 1024))
         val magic = ByteArray(4)
         input.readFully(magic)
@@ -29,7 +54,7 @@ object TagReader {
         }
     }
 
-    private fun readFlac(input: DataInputStream): Tags? {
+    private fun readFlac(input: DataInputStream): Pair<ByteArray, Int>? {
         while (true) {
             val header = input.readInt()
             val last = header ushr 31 == 1
@@ -38,7 +63,7 @@ object TagReader {
             if (type == 4) {
                 val block = ByteArray(length)
                 input.readFully(block)
-                return parseComments(block, 0)
+                return block to 0
             }
             // Pictures and seek tables are skipped without being read into memory.
             skipFully(input, length.toLong())
@@ -48,7 +73,7 @@ object TagReader {
 
     // Ogg pages carry packets in 255-byte lacing segments; packet 0 is the codec
     // header, packet 1 the comments (OpusTags, or Vorbis' 0x03 "vorbis").
-    private fun readOgg(input: DataInputStream): Tags? {
+    private fun readOgg(input: DataInputStream): Pair<ByteArray, Int>? {
         var packetIndex = 0
         val packet = ByteArrayOutputStream()
         var firstPage = true
@@ -80,7 +105,7 @@ object TagReader {
                             data.size >= 7 && data[0].toInt() == 3 && String(data, 1, 6, Charsets.US_ASCII) == "vorbis" -> 7
                             else -> return null
                         }
-                        return parseComments(data, offset)
+                        return data to offset
                     }
                     packetIndex++
                 }
@@ -89,7 +114,7 @@ object TagReader {
     }
 
     // vendor length + vendor, count, then count × (length + "KEY=value"), all little-endian.
-    private fun parseComments(data: ByteArray, start: Int): Tags {
+    private fun forEachComment(data: ByteArray, start: Int, maxLength: Int, onField: (key: String, value: String) -> Unit) {
         var pos = start
         fun int32(): Int {
             if (pos + 4 > data.size) throw EOFException()
@@ -100,31 +125,26 @@ object TagReader {
             pos += 4
             return v
         }
-        var isrc: String? = null
-        var genre: String? = null
-        runCatching {
+        try {
             // Not `pos += int32()`: that reads pos before int32() advances it.
             val vendor = int32()
             pos += vendor
             val count = int32()
-            repeat(count) {
+            for (i in 0 until count) {
                 val len = int32()
-                if (len < 0 || pos + len > data.size) return@runCatching
-                // Only short fields matter; don't decode the base64 cover as a string.
-                if (len < 512) {
+                if (len < 0 || pos + len > data.size) return
+                if (len < maxLength) {
                     val field = String(data, pos, len, Charsets.UTF_8)
                     val eq = field.indexOf('=')
                     if (eq > 0) {
-                        val key = field.substring(0, eq).uppercase()
                         val value = field.substring(eq + 1).trim()
-                        if (key == "ISRC" && isrc == null && value.isNotEmpty()) isrc = value.uppercase()
-                        if (key == "GENRE" && genre == null && value.isNotEmpty()) genre = value
+                        if (value.isNotEmpty()) onField(field.substring(0, eq).uppercase(), value)
                     }
                 }
                 pos += len
             }
+        } catch (_: EOFException) {
         }
-        return Tags(isrc, genre)
     }
 
     private fun skipFully(input: InputStream, count: Long) {

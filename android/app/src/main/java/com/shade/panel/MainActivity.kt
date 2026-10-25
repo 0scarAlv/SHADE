@@ -2,6 +2,7 @@ package com.shade.panel
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.animation.AnimatedContent
@@ -33,6 +34,7 @@ import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.shade.panel.data.NavScreen
 import com.shade.panel.data.ShadePreferences
+import com.shade.panel.music.MusicViewModel
 import com.shade.panel.ui.AppSettings
 import com.shade.panel.ui.BluetoothSettingsScreen
 import com.shade.panel.ui.GestureNavShell
@@ -49,7 +51,9 @@ import com.shade.panel.ui.panelViewModelFactory
 import com.shade.panel.ui.rememberArtPalette
 import com.shade.panel.ui.theme.ShadeTheme
 
-private enum class Screen { HOME, PANEL, CONNECTION, GESTURE_SETTINGS, SETTINGS, MUSIC }
+// MUSIC (the phone's own player) is where the app opens; HOME and everything
+// reached from it make up the deck — the PC panel side.
+private enum class Screen { MUSIC, HOME, PANEL, CONNECTION, GESTURE_SETTINGS, SETTINGS }
 
 class MainActivity : ComponentActivity() {
 
@@ -67,6 +71,7 @@ class MainActivity : ComponentActivity() {
             // Home can show live data and every screen shares the same state.
             val viewModel: PanelViewModel = viewModel(factory = panelViewModelFactory(context))
             val uiState by viewModel.uiState.collectAsState()
+            val musicViewModel: MusicViewModel = viewModel()
 
             // Most screens use the fixed accent ink (LocalInk); the clock
             // keeps its accent from the current cover, animated between
@@ -101,9 +106,17 @@ class MainActivity : ComponentActivity() {
                     Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
                         // Still no navigation library — a flat enum + AnimatedContent
                         // covers this handful of screens with less ceremony.
-                        var screen by rememberSaveable { mutableStateOf(Screen.HOME) }
+                        var screen by rememberSaveable { mutableStateOf(Screen.MUSIC) }
                         var panelStart by rememberSaveable { mutableStateOf(NavScreen.PLAYER) }
                         val goHome = { screen = Screen.HOME }
+                        // Only the device making sound records listens, so the
+                        // phone's own music stops when it turns into the deck.
+                        val goDeck = {
+                            musicViewModel.pause()
+                            screen = Screen.HOME
+                        }
+                        val goMusic = { screen = Screen.MUSIC }
+                        BackHandler(enabled = screen == Screen.HOME, onBack = goMusic)
 
                         AnimatedContent(
                             targetState = screen,
@@ -118,7 +131,7 @@ class MainActivity : ComponentActivity() {
                                 Screen.CONNECTION -> BluetoothSettingsScreen(viewModel = viewModel, onBack = goHome)
                                 Screen.GESTURE_SETTINGS -> GestureSettingsScreen(onBack = goHome)
                                 Screen.SETTINGS -> SettingsScreen(onBack = goHome)
-                                Screen.MUSIC -> MusicScreen(onBack = goHome)
+                                Screen.MUSIC -> MusicScreen(vm = musicViewModel, onOpenDeck = goDeck)
                                 Screen.HOME -> HomeScreen(
                                     viewModel = viewModel,
                                     onOpenPanel = { start ->
@@ -128,7 +141,7 @@ class MainActivity : ComponentActivity() {
                                     onOpenConnection = { screen = Screen.CONNECTION },
                                     onOpenGestureSettings = { screen = Screen.GESTURE_SETTINGS },
                                     onOpenSettings = { screen = Screen.SETTINGS },
-                                    onOpenMusic = { screen = Screen.MUSIC },
+                                    onOpenMusic = goMusic,
                                 )
                             }
                         }
