@@ -94,6 +94,8 @@ private val SCREEN_PADDING = 20.dp
 
 private enum class PlayerView { ART, LYRICS, QUEUE }
 
+private enum class LibraryTab { SONGS, STATS }
+
 // The app's main screen: the phone's own songs, with a mini player docked at
 // the bottom that drags (or taps) open into the full player, Poweramp style.
 // The deck — the PC panel and the rest — is one slide of the DECK key away.
@@ -182,27 +184,39 @@ private fun ColumnScope.Library(vm: MusicViewModel, now: NowPlaying) {
         }
     }
 
+    var tab by rememberSaveable { mutableStateOf(LibraryTab.SONGS) }
+    val bottomPadding = if (now.hasTrack) MINI_HEIGHT + 12.dp else 0.dp
+
     Row(verticalAlignment = Alignment.CenterVertically) {
-        Column(Modifier.weight(1f)) {
-            DotText("${songs.size} CANCIONES", 15.sp, weight = FontWeight.Black)
-            Caption(
-                when {
-                    loading && songs.isEmpty() -> stringResource(R.string.music_scanning)
-                    loading -> "Leyendo etiquetas…"
-                    else -> stringResource(R.string.music_swipe_hint)
-                },
-                color = Ink.TextSubtle,
-                size = 9.sp,
-            )
+        Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(18.dp)) {
+            DotText("CANCIONES", 15.sp, weight = FontWeight.Black, lit = tab == LibraryTab.SONGS, modifier = Modifier.clickableNoRipple { tab = LibraryTab.SONGS })
+            DotText("STATS", 15.sp, weight = FontWeight.Black, lit = tab == LibraryTab.STATS, modifier = Modifier.clickableNoRipple { tab = LibraryTab.STATS })
         }
-        KeyButton(onClick = vm::shuffleAll, width = 64.dp, height = 40.dp, active = now.shuffle) { CapLabel("MIX", 11.sp) }
+        if (tab == LibraryTab.SONGS) {
+            KeyButton(onClick = vm::shuffleAll, width = 64.dp, height = 40.dp, active = now.shuffle) { CapLabel("MIX", 11.sp) }
+        }
     }
+    Spacer(Modifier.height(4.dp))
+    if (tab == LibraryTab.STATS) {
+        Spacer(Modifier.height(8.dp))
+        StatsPane(vm, bottomPadding, Modifier.weight(1f))
+        return
+    }
+    Caption(
+        when {
+            loading && songs.isEmpty() -> stringResource(R.string.music_scanning)
+            loading -> "${songs.size} canciones · leyendo etiquetas…"
+            else -> "${songs.size} canciones · " + stringResource(R.string.music_swipe_hint)
+        },
+        color = Ink.TextSubtle,
+        size = 9.sp,
+    )
     Spacer(Modifier.height(10.dp))
 
     Box(Modifier.weight(1f).fillMaxWidth()) {
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(bottom = if (now.hasTrack) MINI_HEIGHT + 12.dp else 0.dp),
+            contentPadding = PaddingValues(bottom = bottomPadding),
         ) {
             items(songs, key = { it.id }) { song ->
                 SongRow(

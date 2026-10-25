@@ -75,6 +75,11 @@ class MusicViewModel(app: Application) : AndroidViewModel(app) {
     private val lyricsCache = LruCache<String, Lyrics>(24)
     private var lyricsFor: String? = null
 
+    private val _statsPeriod = MutableStateFlow(StatsPeriod.SEMANA)
+    val statsPeriod: StateFlow<StatsPeriod> = _statsPeriod.asStateFlow()
+    private val _stats = MutableStateFlow(StatsSummary.EMPTY)
+    val stats: StateFlow<StatsSummary> = _stats.asStateFlow()
+
     private var controllerFuture: ListenableFuture<MediaController>? = null
     private var controller: MediaController? = null
     private var ticker: Job? = null
@@ -102,6 +107,20 @@ class MusicViewModel(app: Application) : AndroidViewModel(app) {
                 publish(c)
                 publishQueue(c)
             }, MoreExecutors.directExecutor())
+        }
+    }
+
+    fun setStatsPeriod(period: StatsPeriod) {
+        _statsPeriod.value = period
+        refreshStats()
+    }
+
+    /** Re-reads the journal; the open listen is saved every 30 s, so that's as fresh as it gets. */
+    fun refreshStats() {
+        val period = _statsPeriod.value
+        viewModelScope.launch {
+            val summary = withContext(Dispatchers.IO) { ListenStats.query(ListenDb.get(getApplication()), period) }
+            if (_statsPeriod.value == period) _stats.value = summary
         }
     }
 

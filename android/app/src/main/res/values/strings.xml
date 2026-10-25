@@ -52,7 +52,7 @@
     <string name="music_idle">Elige una canción</string>
     <string name="music_search">Buscar canción, artista o álbum</string>
     <string name="music_scanning">Buscando tu música…</string>
-    <string name="music_swipe_hint">Desliza a la izquierda para la cola</string>
+    <string name="music_swipe_hint">desliza a la izquierda para la cola</string>
 
     <!-- Connection -->
     <string name="connection_title">Conexión</string>
