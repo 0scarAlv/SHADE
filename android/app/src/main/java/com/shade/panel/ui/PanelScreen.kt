@@ -393,11 +393,11 @@ private fun KnobColumn(uiState: PanelUiState, viewModel: PanelViewModel, knobSiz
     }
 }
 
-private enum class Glyph { PREV, NEXT, PLAY_PAUSE }
+internal enum class Glyph { PREV, NEXT, PLAY_PAUSE }
 
 // Transport symbols drawn as plain geometry rather than icon-font glyphs.
 @Composable
-private fun TransportGlyph(glyph: Glyph) {
+internal fun TransportGlyph(glyph: Glyph) {
     val color = Ink.Text
     Canvas(Modifier.size(width = if (glyph == Glyph.PLAY_PAUSE) 34.dp else 24.dp, height = 14.dp)) {
         val h = size.height

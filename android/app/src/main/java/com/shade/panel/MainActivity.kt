@@ -42,13 +42,14 @@ import com.shade.panel.ui.LocalAppSettings
 import com.shade.panel.ui.LocalArtColors
 import com.shade.panel.ui.InkColor
 import com.shade.panel.ui.LocalInk
+import com.shade.panel.ui.MusicScreen
 import com.shade.panel.ui.PanelViewModel
 import com.shade.panel.ui.SettingsScreen
 import com.shade.panel.ui.panelViewModelFactory
 import com.shade.panel.ui.rememberArtPalette
 import com.shade.panel.ui.theme.ShadeTheme
 
-private enum class Screen { HOME, PANEL, CONNECTION, GESTURE_SETTINGS, SETTINGS }
+private enum class Screen { HOME, PANEL, CONNECTION, GESTURE_SETTINGS, SETTINGS, MUSIC }
 
 class MainActivity : ComponentActivity() {
 
@@ -117,6 +118,7 @@ class MainActivity : ComponentActivity() {
                                 Screen.CONNECTION -> BluetoothSettingsScreen(viewModel = viewModel, onBack = goHome)
                                 Screen.GESTURE_SETTINGS -> GestureSettingsScreen(onBack = goHome)
                                 Screen.SETTINGS -> SettingsScreen(onBack = goHome)
+                                Screen.MUSIC -> MusicScreen(onBack = goHome)
                                 Screen.HOME -> HomeScreen(
                                     viewModel = viewModel,
                                     onOpenPanel = { start ->
@@ -126,6 +128,7 @@ class MainActivity : ComponentActivity() {
                                     onOpenConnection = { screen = Screen.CONNECTION },
                                     onOpenGestureSettings = { screen = Screen.GESTURE_SETTINGS },
                                     onOpenSettings = { screen = Screen.SETTINGS },
+                                    onOpenMusic = { screen = Screen.MUSIC },
                                 )
                             }
                         }

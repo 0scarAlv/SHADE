@@ -23,8 +23,8 @@ android {
         applicationId = "com.shade.panel"
         minSdk = 26
         targetSdk = 36
-        versionCode = 12
-        versionName = "1.4.3"
+        versionCode = 13
+        versionName = "1.5.0"
     }
 
     signingConfigs {
@@ -71,5 +71,7 @@ dependencies {
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.coil.compose)
     implementation(libs.coil.network.okhttp)
+    implementation(libs.androidx.media3.exoplayer)
+    implementation(libs.androidx.media3.session)
     debugImplementation(libs.androidx.compose.ui.tooling)
 }

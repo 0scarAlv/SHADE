@@ -68,6 +68,7 @@ fun HomeScreen(
     onOpenConnection: () -> Unit,
     onOpenGestureSettings: () -> Unit,
     onOpenSettings: () -> Unit,
+    onOpenMusic: () -> Unit,
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val swipeThresholdPx = with(LocalDensity.current) { SWIPE_UP_THRESHOLD.toPx() }
@@ -98,7 +99,7 @@ fun HomeScreen(
                 .padding(horizontal = 24.dp, vertical = 18.dp),
         ) {
             val landscape = maxWidth > maxHeight
-            val selectors = selectorModels(uiState, onOpenPanel, onOpenConnection, onOpenGestureSettings, onOpenSettings)
+            val selectors = selectorModels(uiState, onOpenPanel, onOpenConnection, onOpenGestureSettings, onOpenSettings, onOpenMusic)
 
             Column(
                 modifier = Modifier
@@ -215,6 +216,7 @@ private fun selectorModels(
     onOpenConnection: () -> Unit,
     onOpenGestureSettings: () -> Unit,
     onOpenSettings: () -> Unit,
+    onOpenMusic: () -> Unit,
 ): List<SelectorModel> {
     val resource = uiState.resource
     val cpu = resource?.cpuUsagePercent?.roundToInt()
@@ -227,6 +229,8 @@ private fun selectorModels(
             onOpenPanel(NavScreen.STATS)
         },
         SelectorModel(stringResource(R.string.tile_clock), "CLK", "TIME", false, null) { onOpenPanel(NavScreen.CLOCK) },
+        // The phone's own files, not the PC: its own player and listening journal.
+        SelectorModel(stringResource(R.string.tile_music), "MUS", "LOCAL", false, null, onOpenMusic),
         SelectorModel(
             stringResource(R.string.tile_connection),
             "LINK",

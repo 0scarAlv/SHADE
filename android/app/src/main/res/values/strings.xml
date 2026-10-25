@@ -45,6 +45,13 @@
     <string name="tile_connection">Conexión</string>
     <string name="tile_gestures">Gestos</string>
     <string name="tile_settings">Ajustes</string>
+    <string name="tile_music">Música</string>
+
+    <!-- Música (the phone's own player) -->
+    <string name="music_permission">Shade necesita leer tu música para reproducir los archivos del teléfono y llevar tus estadísticas de escucha.</string>
+    <string name="music_idle">Elige una canción</string>
+    <string name="music_search">Buscar canción, artista o álbum</string>
+    <string name="music_scanning">Buscando tu música…</string>
 
     <!-- Connection -->
     <string name="connection_title">Conexión</string>
