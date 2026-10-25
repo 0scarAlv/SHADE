@@ -15,6 +15,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.draggable
 import androidx.compose.foundation.gestures.rememberDraggableState
@@ -27,7 +28,6 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -57,6 +57,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
@@ -69,10 +70,12 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.min
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.media3.common.Player
 import com.shade.panel.R
+import com.shade.panel.music.LocalSpectrum
 import com.shade.panel.music.Lyrics
 import com.shade.panel.music.MusicViewModel
 import com.shade.panel.music.NowPlaying
@@ -372,6 +375,28 @@ private fun MiniPlayer(now: NowPlaying, vm: MusicViewModel, onOpen: () -> Unit, 
 private fun FullPlayer(now: NowPlaying, vm: MusicViewModel, onCollapse: () -> Unit, modifier: Modifier) {
     var view by rememberSaveable { mutableStateOf(PlayerView.ART) }
     val toggle = { target: PlayerView -> view = if (view == target) PlayerView.ART else target }
+    // Swipe the cover (or lyrics) sideways: left = next song, right = previous.
+    // Not on the queue view, where a sideways slip while browsing shouldn't skip.
+    val haptics = LocalHapticFeedback.current
+    val scope = rememberCoroutineScope()
+    val skipPx = with(LocalDensity.current) { 80.dp.toPx() }
+    val swipe = remember { Animatable(0f) }
+    val trackSwipe = if (view == PlayerView.QUEUE) Modifier else Modifier.pointerInput(Unit) {
+        detectHorizontalDragGestures(
+            onDragEnd = {
+                val dx = swipe.value
+                if (dx <= -skipPx || dx >= skipPx) {
+                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                    if (dx < 0) vm.next() else vm.previousTrack()
+                }
+                scope.launch { swipe.animateTo(0f, spring(stiffness = 500f)) }
+            },
+            onDragCancel = { scope.launch { swipe.animateTo(0f) } },
+        ) { change, delta ->
+            change.consume()
+            scope.launch { swipe.snapTo((swipe.value + delta).coerceIn(-skipPx * 1.6f, skipPx * 1.6f)) }
+        }
+    }
 
     BoxWithConstraints(modifier.fillMaxSize()) {
         val header = @Composable {
@@ -390,16 +415,23 @@ private fun FullPlayer(now: NowPlaying, vm: MusicViewModel, onCollapse: () -> Un
             }
         }
         val media = @Composable { m: Modifier ->
-            Box(m, contentAlignment = Alignment.Center) {
+            Box(
+                m.then(trackSwipe).graphicsLayer {
+                    translationX = swipe.value
+                    alpha = 1f - (kotlin.math.abs(swipe.value) / (skipPx * 3f)).coerceAtMost(0.5f)
+                },
+                contentAlignment = Alignment.Center,
+            ) {
                 when (view) {
-                    PlayerView.ART -> ArtImage(
-                        now.artUri,
-                        Modifier
-                            .fillMaxHeight()
-                            .aspectRatio(1f, matchHeightConstraintsFirst = true)
-                            .pointerInput(Unit) { detectTapGestures(onDoubleTap = { toggle(PlayerView.LYRICS) }) },
-                        shape = RoundedCornerShape(16.dp),
-                    )
+                    PlayerView.ART -> BoxWithConstraints(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        ArtImage(
+                            now.artUri,
+                            Modifier
+                                .size(min(maxWidth, maxHeight))
+                                .pointerInput(Unit) { detectTapGestures(onDoubleTap = { toggle(PlayerView.LYRICS) }) },
+                            shape = RoundedCornerShape(16.dp),
+                        )
+                    }
                     PlayerView.LYRICS -> DisplayPanel(
                         Modifier.fillMaxSize().pointerInput(Unit) { detectTapGestures(onDoubleTap = { toggle(PlayerView.LYRICS) }) },
                     ) { LyricsView(vm, now.positionMs) }
@@ -431,6 +463,7 @@ private fun FullPlayer(now: NowPlaying, vm: MusicViewModel, onCollapse: () -> Un
     }
 }
 
+@androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 @Composable
 private fun Controls(now: NowPlaying, vm: MusicViewModel, view: PlayerView, toggle: (PlayerView) -> Unit, modifier: Modifier) {
     val cyber = cyberOn()
@@ -450,7 +483,21 @@ private fun Controls(now: NowPlaying, vm: MusicViewModel, view: PlayerView, togg
             13.sp,
             modifier = Modifier.basicMarquee(iterations = Int.MAX_VALUE, initialDelayMillis = 3_000, velocity = 30.dp),
         )
-        Spacer(Modifier.height(14.dp))
+        Spacer(Modifier.height(12.dp))
+        // The sound itself, from LocalSpectrum; tap to cycle bars → mirror → wave, like the panel.
+        val settings = LocalAppSettings.current
+        val beat = rememberBeat(LocalSpectrum.bands, cyber && now.playing)
+        BarSpectrum(
+            LocalSpectrum.bands,
+            modifier = Modifier.fillMaxWidth().height(64.dp).clickableNoRipple {
+                val styles = SpectrumStyle.entries
+                settings.spectrumStyle = styles[(settings.spectrumStyle.ordinal + 1) % styles.size]
+            },
+            rows = 10,
+            style = settings.spectrumStyle,
+            beat = beat,
+        )
+        Spacer(Modifier.height(10.dp))
         SegmentBar(
             fraction = now.fraction,
             segments = 40,

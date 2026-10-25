@@ -27,14 +27,11 @@ data class Song(
     val genre: String?,
     val isrc: String?,
 ) {
-    val artUri: Uri get() = ContentUris.withAppendedId(ALBUM_ART, albumId)
+    // The file itself: AudioArtFetcher pulls the embedded cover out of it.
+    val artUri: Uri get() = uri
 
     // Folded once for search and for the cross-device song key.
     val searchKey: String by lazy { fold("$title $artist $album") }
-
-    companion object {
-        private val ALBUM_ART: Uri = Uri.parse("content://media/external/audio/albumart")
-    }
 }
 
 /**

@@ -181,6 +181,9 @@ class MusicViewModel(app: Application) : AndroidViewModel(app) {
     // Like most players: past the first seconds "previous" restarts the song.
     fun previous() { controller?.seekToPrevious() }
 
+    // The swipe always means the song before, never "restart this one".
+    fun previousTrack() { controller?.seekToPreviousMediaItem() }
+
     fun seekTo(fraction: Float) {
         val c = controller ?: return
         if (c.duration > 0) c.seekTo((c.duration * fraction.coerceIn(0f, 1f)).toLong())

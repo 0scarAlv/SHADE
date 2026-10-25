@@ -2,7 +2,11 @@ package com.shade.panel.music
 
 import android.app.PendingIntent
 import android.content.ContentUris
+import android.content.Context
 import android.content.Intent
+import android.graphics.Bitmap
+import android.net.Uri
+import android.util.Size
 import android.provider.MediaStore
 import androidx.core.os.bundleOf
 import androidx.media3.common.AudioAttributes
@@ -10,11 +14,19 @@ import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
+import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.audio.AudioSink
+import androidx.media3.exoplayer.audio.DefaultAudioSink
+import androidx.media3.exoplayer.audio.TeeAudioProcessor
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
+import com.google.common.util.concurrent.MoreExecutors
+import androidx.media3.common.util.BitmapLoader
+import androidx.media3.datasource.DataSourceBitmapLoader
+import java.util.concurrent.Executors
 import com.shade.panel.MainActivity
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.cancel
@@ -25,6 +37,7 @@ import kotlinx.coroutines.launch
 // Plays the phone's own files in the background. Media3 turns the session into
 // the media notification, lock-screen controls and headset-button handling, and
 // keeps the service in the foreground (type mediaPlayback) while playing.
+@androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 class PlaybackService : MediaSessionService() {
     private var session: MediaSession? = null
     private lateinit var player: ExoPlayer
@@ -33,7 +46,14 @@ class PlaybackService : MediaSessionService() {
 
     override fun onCreate() {
         super.onCreate()
-        player = ExoPlayer.Builder(this)
+        // Every PCM buffer also goes to LocalSpectrum, for the player's visualizer.
+        val renderers = object : DefaultRenderersFactory(this) {
+            override fun buildAudioSink(context: Context, enableFloatOutput: Boolean, enableAudioTrackPlaybackParams: Boolean): AudioSink =
+                DefaultAudioSink.Builder(context)
+                    .setAudioProcessors(arrayOf(TeeAudioProcessor(LocalSpectrum)))
+                    .build()
+        }
+        player = ExoPlayer.Builder(this, renderers)
             // true: ExoPlayer requests audio focus and pauses for calls/other apps.
             .setAudioAttributes(
                 AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MUSIC).build(),
@@ -49,6 +69,7 @@ class PlaybackService : MediaSessionService() {
         session = MediaSession.Builder(this, player)
             .setSessionActivity(openApp)
             .setCallback(ResolveItems)
+            .setBitmapLoader(EmbeddedArtLoader(this))
             .build()
 
         recorder = ListenRecorder(ListenDb.get(this))
@@ -57,6 +78,7 @@ class PlaybackService : MediaSessionService() {
                 if (events.containsAny(Player.EVENT_MEDIA_ITEM_TRANSITION, Player.EVENT_IS_PLAYING_CHANGED, Player.EVENT_POSITION_DISCONTINUITY)) {
                     recorder.observe(player)
                 }
+                if (events.contains(Player.EVENT_IS_PLAYING_CHANGED) && !player.isPlaying) LocalSpectrum.clear()
             }
         })
         scope.launch {
@@ -96,6 +118,23 @@ class PlaybackService : MediaSessionService() {
                 else item.buildUpon().setUri(contentUri(item.mediaId)).build()
             }.toMutableList(),
         )
+    }
+
+    // Notification/lock-screen art: the items' artwork URI is the song file
+    // itself (see Song.artUri), so read its embedded cover like AudioArtFetcher.
+    @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
+    private class EmbeddedArtLoader(private val context: android.content.Context) : BitmapLoader {
+        private val fallback = DataSourceBitmapLoader(context)
+        private val executor = MoreExecutors.listeningDecorator(Executors.newSingleThreadExecutor())
+
+        override fun supportsMimeType(mimeType: String) = fallback.supportsMimeType(mimeType)
+        override fun decodeBitmap(data: ByteArray): ListenableFuture<Bitmap> = fallback.decodeBitmap(data)
+        override fun loadBitmap(uri: Uri): ListenableFuture<Bitmap> =
+            if (android.os.Build.VERSION.SDK_INT >= 29 && uri.authority == "media" && uri.path?.contains("/audio/media/") == true) {
+                executor.submit<Bitmap> { context.contentResolver.loadThumbnail(uri, Size(512, 512), null) }
+            } else {
+                fallback.loadBitmap(uri)
+            }
     }
 
     companion object {
