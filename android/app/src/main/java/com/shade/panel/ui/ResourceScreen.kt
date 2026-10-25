@@ -1,5 +1,6 @@
 package com.shade.panel.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -41,7 +42,7 @@ import com.shade.panel.data.ProcessEntry
 import kotlin.math.roundToInt
 
 private val WarnColor = Color(0xFFFFB13B)
-private val AlertColor = Color(0xFFFF4B3E)
+internal val AlertColor = Color(0xFFFF4B3E)
 
 // System monitor: four display panels (CPU, memory, network, disk),
 // each with a large readout, a segmented level bar and a
@@ -100,7 +101,7 @@ fun ResourceScreen(viewModel: PanelViewModel) {
                         level = cpuFraction,
                         levelColor = levelColor(cpuFraction, ink),
                         history = history.cpu,
-                        onClick = { viewModel.requestProcesses("cpu") },
+                        onClick = { viewModel.openProcessBoard("cpu") },
                         modifier = Modifier.weight(1f).fillMaxHeight(),
                     )
                     MeterWindow(
@@ -110,7 +111,7 @@ fun ResourceScreen(viewModel: PanelViewModel) {
                         level = ramFraction,
                         levelColor = levelColor(ramFraction, ink),
                         history = history.ram,
-                        onClick = { viewModel.requestProcesses("ram") },
+                        onClick = { viewModel.openProcessBoard("ram") },
                         modifier = Modifier.weight(1f).fillMaxHeight(),
                     )
                 }
@@ -140,16 +141,19 @@ fun ResourceScreen(viewModel: PanelViewModel) {
             }
         }
 
-        val drilldownMetric = uiState.processDrilldownMetric
-        // Last non-null metric, so the overlay keeps its title while fading out.
-        var shownMetric by remember { mutableStateOf("cpu") }
-        if (drilldownMetric != null) shownMetric = drilldownMetric
-        AnimatedVisibility(visible = drilldownMetric != null, enter = fadeIn(tween(150)), exit = fadeOut(tween(150))) {
-            ProcessOverlay(
-                metric = shownMetric,
-                entries = uiState.processDrilldownEntries,
-                onRefresh = { viewModel.requestProcesses(shownMetric) },
-                onDismiss = viewModel::dismissProcessDrilldown,
+        val boardSort = uiState.processBoardSort
+        // Last non-null sort, so the board keeps its layout while fading out.
+        var shownSort by remember { mutableStateOf("ram") }
+        if (boardSort != null) shownSort = boardSort
+        BackHandler(enabled = boardSort != null, onBack = viewModel::closeProcessBoard)
+        AnimatedVisibility(visible = boardSort != null, enter = fadeIn(tween(150)), exit = fadeOut(tween(150))) {
+            ProcessBoard(
+                sort = shownSort,
+                apps = uiState.processApps,
+                cpuHistory = uiState.processCpuHistory,
+                resource = uiState.resource,
+                onSort = viewModel::sortProcessBoard,
+                onDismiss = viewModel::closeProcessBoard,
             )
         }
     }
@@ -237,72 +241,6 @@ private fun splitRate(bytesPerSec: Double): Pair<String, String> {
 private fun autoScaleMax(vararg histories: List<Float>): Float {
     val peak = histories.maxOf { it.maxOrNull() ?: 0f }
     return (peak * 1.15f).coerceAtLeast(256f * 1024f)
-}
-
-// Scrim + a panel listing the top processes for whichever meter was
-// tapped. entries == null means the reply hasn't arrived yet.
-@Composable
-private fun ProcessOverlay(metric: String, entries: List<ProcessEntry>?, onRefresh: () -> Unit, onDismiss: () -> Unit) {
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Color.Black.copy(alpha = 0.7f))
-            .clickableNoRipple(onDismiss),
-        contentAlignment = Alignment.Center,
-    ) {
-        DisplayPanel(
-            contentPadding = 0.dp,
-            modifier = Modifier
-                .padding(24.dp)
-                .widthIn(max = 460.dp)
-                .heightIn(max = 520.dp)
-                // Swallows taps so the list itself doesn't dismiss.
-                .clickableNoRipple {},
-        ) {
-            Column(Modifier.padding(16.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Caption(stringResource(if (metric == "cpu") R.string.resource_top_cpu else R.string.resource_top_ram), modifier = Modifier.weight(1f))
-                    KeyButton(onClick = onRefresh, width = 56.dp, height = 32.dp, contentDescription = stringResource(R.string.action_refresh)) {
-                        CapLabel("RFSH", 10.sp)
-                    }
-                    Spacer(Modifier.width(8.dp))
-                    KeyButton(onClick = onDismiss, width = 56.dp, height = 32.dp, contentDescription = stringResource(R.string.action_close)) {
-                        CapLabel("CLOSE", 10.sp)
-                    }
-                }
-                Spacer(Modifier.height(12.dp))
-                DisplayPanel(Modifier.fillMaxWidth()) {
-                    if (entries == null) {
-                        DotText("LOADING", 16.sp)
-                    } else {
-                        val peak = entries.maxOfOrNull { if (metric == "cpu") it.cpuPercent else it.ramBytes.toDouble() } ?: 0.0
-                        LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            itemsIndexed(entries) { index, entry ->
-                                val raw = if (metric == "cpu") entry.cpuPercent else entry.ramBytes.toDouble()
-                                Column {
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        DotText("%02d".format(index + 1), 12.sp, lit = false)
-                                        Spacer(Modifier.width(8.dp))
-                                        DotText(entry.name.uppercase(), 14.sp, modifier = Modifier.weight(1f))
-                                        DotText(
-                                            if (metric == "cpu") "%.1f%%".format(entry.cpuPercent) else formatBytes(entry.ramBytes).uppercase(),
-                                            13.sp,
-                                        )
-                                    }
-                                    Spacer(Modifier.height(3.dp))
-                                    SegmentBar(
-                                        fraction = if (peak > 0) (raw / peak).toFloat() else 0f,
-                                        segments = 40,
-                                        modifier = Modifier.fillMaxWidth().height(4.dp),
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
 }
 
 // Display color under 70% used, amber under 90%, red above.

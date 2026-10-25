@@ -66,6 +66,8 @@ data class ProcessEntry(
     val pid: Int,
     val ramBytes: Long,
     val cpuPercent: Double,
+    // How many processes the agent summed into this entry (apps board only).
+    val instances: Int = 1,
 )
 
 @Serializable

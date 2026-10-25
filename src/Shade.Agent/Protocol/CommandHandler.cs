@@ -85,6 +85,9 @@ public static class CommandHandler
             case "topProcessesByCpu":
                 await clientHub.SendToAsync(connection, ToProcessListMessage("cpu", resourceMonitor.TopProcessesByCpu));
                 break;
+            case "topApps":
+                await clientHub.SendToAsync(connection, ToProcessListMessage("apps", resourceMonitor.TopApps));
+                break;
             default:
                 logger.LogInformation("Acción '{Action}' desconocida.", command.Action);
                 break;
@@ -98,5 +101,5 @@ public static class CommandHandler
     }
 
     private static ProcessListMessage ToProcessListMessage(string metric, IReadOnlyList<ProcessSample> samples) =>
-        new(metric, samples.Select(s => new ProcessEntry(s.Name, s.Pid, s.RamBytes, s.CpuPercent)).ToList());
+        new(metric, samples.Select(s => new ProcessEntry(s.Name, s.Pid, s.RamBytes, s.CpuPercent, s.Instances)).ToList());
 }

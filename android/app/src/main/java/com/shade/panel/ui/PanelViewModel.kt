@@ -47,8 +47,12 @@ data class PanelUiState(
     val resource: ResourceMessage? = null,
     // Non-null metric means the drilldown overlay should be showing; entries
     // stay null while the reply is in flight (drives a loading state).
-    val processDrilldownMetric: String? = null,
-    val processDrilldownEntries: List<ProcessEntry>? = null,
+    // Live process board: open while non-null, sorted by "cpu" or "ram".
+    val processBoardSort: String? = null,
+    // null until the first reply; per app (the agent sums each app's processes).
+    val processApps: List<ProcessEntry>? = null,
+    // Each app's CPU over the last minute, oldest first, for its row's trace.
+    val processCpuHistory: Map<String, List<Float>> = emptyMap(),
 ) {
     val art: Any? get() = artBytes ?: artUrl
     val hasTrack: Boolean get() = title.isNotBlank()
@@ -274,16 +278,19 @@ class PanelViewModel(
             }
             launch {
                 active.processUpdates.collect { msg ->
-                    // Guards against a stale reply arriving after the overlay was
-                    // dismissed or reopened for the other metric — same shape as
-                    // the artUpdates guard above.
+                    if (msg.metric != "apps") return@collect
                     _uiState.update {
-                        if (it.processDrilldownMetric == msg.metric) it.copy(processDrilldownEntries = msg.processes) else it
+                        // A late reply after the board closed is dropped.
+                        if (it.processBoardSort == null) it
+                        else it.copy(processApps = msg.processes, processCpuHistory = appendCpu(it.processCpuHistory, msg.processes))
                     }
                 }
             }
         }
     }
+
+    private fun appendCpu(history: Map<String, List<Float>>, apps: List<ProcessEntry>): Map<String, List<Float>> =
+        apps.associate { app -> app.name to ((history[app.name] ?: emptyList()) + app.cpuPercent.toFloat()).takeLast(BOARD_HISTORY) }
 
     private fun recordHistory(r: ResourceMessage) {
         val ramFraction = if (r.ramTotalBytes > 0) {
@@ -363,13 +370,28 @@ class PanelViewModel(
         transport.sendCommand("seek", value = positionMs.toDouble())
     }
 
-    fun requestProcesses(metric: String) {
-        _uiState.update { it.copy(processDrilldownMetric = metric, processDrilldownEntries = null) }
-        transport.sendCommand(if (metric == "cpu") "topProcessesByCpu" else "topProcessesByRam")
+    private var boardJob: Job? = null
+
+    /** Opens the live process board; it polls the agent every 2 s until closed. */
+    fun openProcessBoard(sort: String) {
+        _uiState.update { it.copy(processBoardSort = sort, processApps = null, processCpuHistory = emptyMap()) }
+        boardJob?.cancel()
+        boardJob = viewModelScope.launch {
+            while (true) {
+                transport.sendCommand("topApps")
+                delay(BOARD_POLL_MS)
+            }
+        }
     }
 
-    fun dismissProcessDrilldown() {
-        _uiState.update { it.copy(processDrilldownMetric = null, processDrilldownEntries = null) }
+    fun sortProcessBoard(sort: String) {
+        _uiState.update { if (it.processBoardSort == null) it else it.copy(processBoardSort = sort) }
+    }
+
+    fun closeProcessBoard() {
+        boardJob?.cancel()
+        boardJob = null
+        _uiState.update { it.copy(processBoardSort = null, processApps = null, processCpuHistory = emptyMap()) }
     }
 
     override fun onCleared() {
@@ -378,6 +400,9 @@ class PanelViewModel(
     }
 
     private companion object {
+        const val BOARD_POLL_MS = 2_000L
+        const val BOARD_HISTORY = 30
+
         const val ART_BASE_URL = "http://127.0.0.1:8080/art"
         const val INTERPOLATION_TICK_MS = 250L
         const val POSITION_DRIFT_TOLERANCE_MS = 900L

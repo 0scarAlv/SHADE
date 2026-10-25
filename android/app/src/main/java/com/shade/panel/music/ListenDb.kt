@@ -111,24 +111,24 @@ class ListenDb private constructor(context: Context) :
         listener = owner
     }
 
-    /** Empties the journal and the sync cursors; who the phone belongs to (and its link) stays. */
-    fun clearListens(cursorKeys: List<String>) {
+    /** Empties the journal and every sync cursor (meta keys starting with [cursorPrefixes]); who the phone belongs to stays. */
+    fun clearListens(cursorPrefixes: List<String>) {
         val db = writableDatabase
         db.beginTransaction()
         try {
             db.delete("listen", null, null)
-            cursorKeys.forEach { db.delete("meta", "key = ?", arrayOf(it)) }
+            cursorPrefixes.forEach { db.delete("meta", "key LIKE ?", arrayOf("$it%")) }
             db.setTransactionSuccessful()
         } finally {
             db.endTransaction()
         }
     }
 
-    /** This phone's own listens changed after [since] (local clock), oldest first. */
-    fun ownChangedSince(since: Long, limit: Int): List<Listen> =
+    /** Rows changed after [since] (local clock) that didn't come from [excludeDevice], oldest first. */
+    fun changedSince(since: Long, excludeDevice: String, limit: Int): List<Listen> =
         readableDatabase.rawQuery(
-            "SELECT $COLUMNS FROM listen WHERE device = ? AND updated_at > ? ORDER BY updated_at LIMIT ?",
-            arrayOf(deviceId, since.toString(), limit.toString()),
+            "SELECT $COLUMNS FROM listen WHERE device != ? AND updated_at > ? ORDER BY updated_at LIMIT ?",
+            arrayOf(excludeDevice, since.toString(), limit.toString()),
         ).use { c -> buildList { while (c.moveToNext()) add(c.toListen()) } }
 
     /**

@@ -10,8 +10,8 @@ namespace Shade.Agent.Protocol;
 // of truth for stats. The agent only relays: Nation decides who owns the
 // journal and what to accept; the phone decides whether to pair with that owner.
 //
-// App -> Agent: { type: "sync", listener, since, sinceId, device: {id,name,kind}, listens: [...] }
-// Agent -> App: { type: "syncResult", nation, owner: {id,name}, paired, accepted, listens: [...], more, error }
+// App -> Agent: { type: "sync", listener, listenerName, adopt, pc, since, sinceId, device: {id,name,kind}, listens: [...] }
+// Agent -> App: { type: "syncResult", nation, owner: {id,name}, pc, paired, accepted, listens: [...], more, error, adoptError }
 public static class ListenSyncRelay
 {
     private static HttpClient _http = NewClient(7814);
@@ -36,11 +36,27 @@ public static class ListenSyncRelay
                 return;
             }
             var profile = JsonNode.Parse(await profileResponse.Content.ReadAsStringAsync())!.AsObject();
+            var listener = request["listener"]?.GetValue<string>();
+
+            // The phone's owner asked to bring their identity to this PC (their second Nation).
+            if (request["adopt"]?.GetValue<bool>() == true && listener is not null && listener != profile["listener"]?.GetValue<string>())
+            {
+                var take = new JsonObject { ["listener"] = listener, ["name"] = request["listenerName"]?.GetValue<string>() };
+                using var takeBody = new StringContent(take.ToJsonString(), Encoding.UTF8);
+                takeBody.Headers.ContentType = new MediaTypeHeaderValue("application/json");
+                using var takeResponse = await _http.PostAsync("nation/identity", takeBody);
+                var answer = JsonNode.Parse(await takeResponse.Content.ReadAsStringAsync())?.AsObject();
+                if (takeResponse.IsSuccessStatusCode && answer is not null) profile = answer;
+                else result["adoptError"] = answer?["error"]?.GetValue<string>() ?? "Nation no aceptó el cambio";
+                logger.LogInformation("Identidad llevada a este PC: {Ok}", takeResponse.IsSuccessStatusCode);
+            }
+
             var owner = profile["listener"]?.GetValue<string>();
             result["nation"] = true;
             result["owner"] = new JsonObject { ["id"] = owner, ["name"] = profile["name"]?.GetValue<string>() };
+            // Which PC answered: the phone keeps its sync cursors per PC.
+            result["pc"] = profile["device"]?.GetValue<string>();
 
-            var listener = request["listener"]?.GetValue<string>();
             bool paired = listener is not null && listener == owner;
             result["paired"] = paired;
             if (!paired)

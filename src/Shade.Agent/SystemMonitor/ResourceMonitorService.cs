@@ -16,7 +16,7 @@ public readonly record struct ResourceSample(
     double DiskReadBytesPerSec,
     double DiskWriteBytesPerSec);
 
-public readonly record struct ProcessSample(string Name, int Pid, long RamBytes, double CpuPercent);
+public readonly record struct ProcessSample(string Name, int Pid, long RamBytes, double CpuPercent, int Instances = 1);
 
 // BackgroundService because this owns a recurring 1s tick (PeriodicTimer)
 // rather than reacting to a Windows-pushed event like SpectrumAnalyzer/
@@ -54,6 +54,10 @@ public sealed class ResourceMonitorService : BackgroundService
     // lock since a reference assignment is atomic.
     public IReadOnlyList<ProcessSample> TopProcessesByRam { get; private set; } = Array.Empty<ProcessSample>();
     public IReadOnlyList<ProcessSample> TopProcessesByCpu { get; private set; } = Array.Empty<ProcessSample>();
+
+    // Per app rather than per PID (a browser is dozens of processes): the
+    // heaviest by RAM plus the busiest by CPU, for the panel's live process board.
+    public IReadOnlyList<ProcessSample> TopApps { get; private set; } = Array.Empty<ProcessSample>();
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -229,6 +233,15 @@ public sealed class ResourceMonitorService : BackgroundService
 
         TopProcessesByRam = samples.OrderByDescending(s => s.RamBytes).Take(TopProcessCount).ToList();
         TopProcessesByCpu = samples.OrderByDescending(s => s.CpuPercent).Take(TopProcessCount).ToList();
+
+        var apps = samples
+            .GroupBy(s => s.Name, StringComparer.OrdinalIgnoreCase)
+            .Select(g => new ProcessSample(g.First().Name, g.First().Pid, g.Sum(s => s.RamBytes), g.Sum(s => s.CpuPercent), g.Count()))
+            .ToList();
+        TopApps = apps.OrderByDescending(a => a.RamBytes).Take(TopProcessCount)
+            .Concat(apps.OrderByDescending(a => a.CpuPercent).Take(TopProcessCount))
+            .DistinctBy(a => a.Name)
+            .ToList();
     }
 
     private static (bool HasBattery, int? Percent, bool? Charging) SampleBattery()

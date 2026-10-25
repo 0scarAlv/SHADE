@@ -54,7 +54,7 @@ public sealed record ResourceMessage(
     public string Type => "resource";
 }
 
-public sealed record ProcessEntry(string Name, int Pid, long RamBytes, double CpuPercent);
+public sealed record ProcessEntry(string Name, int Pid, long RamBytes, double CpuPercent, int Instances = 1);
 
 public sealed record ProcessListMessage(string Metric, List<ProcessEntry> Processes)
 {

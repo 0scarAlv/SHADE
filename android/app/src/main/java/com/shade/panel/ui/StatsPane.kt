@@ -168,6 +168,27 @@ private fun NationStrip(sync: SyncState) {
         }
         return
     }
+    val carry = sync.carryTo
+    if (carry != null) {
+        DisplayPanel(Modifier.fillMaxWidth(), contentPadding = 14.dp) {
+            Column {
+                DotText("OTRO PC · ${carry.name.uppercase()}", 14.sp, weight = FontWeight.Black)
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    "Este PC tiene el Nation de ${carry.name}. Si también es tuyo (por ejemplo, el del trabajo), lleva tu identidad: " +
+                        "su historial pasa a ser tuyo y el teléfono junta las estadísticas de los dos PC. " +
+                        "Solo funciona si ese Nation aún no tiene un teléfono vinculado.",
+                    style = TextStyle(fontFamily = Manrope, fontSize = 13.sp, color = Ink.TextMuted),
+                )
+                Spacer(Modifier.height(10.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    KeyButton(onClick = ListenSync::acceptCarry, width = 150.dp, height = 38.dp, active = true) { CapLabel("LLEVAR IDENTIDAD", 10.sp) }
+                    KeyButton(onClick = ListenSync::declineCarry, width = 80.dp, height = 38.dp) { CapLabel("NO", 11.sp) }
+                }
+            }
+        }
+        return
+    }
     val status = when {
         sync.syncing -> "Sincronizando con Nation…"
         sync.message != null -> sync.message
