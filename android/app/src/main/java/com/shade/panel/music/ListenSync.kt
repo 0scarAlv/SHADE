@@ -127,6 +127,12 @@ object ListenSync {
         }
     }
 
+    /** Starts the phone's stats from zero (Nation's journal is cleared on the PC side). */
+    suspend fun clearPhoneHistory() {
+        withContext(Dispatchers.IO) { db.clearListens(listOf(KEY_PULL_SINCE, KEY_PULL_SINCE_ID, KEY_PUSH_UNTIL)) }
+        _state.update { it.copy(revision = it.revision + 1) }
+    }
+
     fun declineLink() {
         val owner = _state.value.askToLink ?: return
         scope?.launch(Dispatchers.IO) { db.setMeta(KEY_DECLINED, owner.id) }

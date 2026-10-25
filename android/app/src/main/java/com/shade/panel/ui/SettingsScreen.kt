@@ -25,6 +25,12 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import com.shade.panel.music.ListenSync
+import kotlinx.coroutines.launch
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -115,6 +121,40 @@ fun SettingsScreen(onBack: () -> Unit) {
         Section(stringResource(R.string.settings_section_clock)) {
             SwitchRow(stringResource(R.string.settings_clock_seconds), stringResource(R.string.settings_clock_seconds_desc), settings.clockSeconds) {
                 settings.clockSeconds = it
+            }
+        }
+        Section("Estadísticas") {
+            // Two taps: the first arms the key, the second wipes.
+            var armed by remember { mutableStateOf(false) }
+            var cleared by remember { mutableStateOf(false) }
+            val scope = rememberCoroutineScope()
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("Borrar historial de escucha", style = titleStyle)
+                    Text(
+                        if (cleared) "Historial del teléfono borrado. El vínculo con Nation se mantiene."
+                        else "Vacía las escuchas guardadas en el teléfono. Las de Nation se borran en el PC.",
+                        style = descStyle,
+                    )
+                }
+                Spacer(Modifier.width(16.dp))
+                KeyButton(
+                    onClick = {
+                        if (!armed) {
+                            armed = true
+                        } else {
+                            armed = false
+                            scope.launch {
+                                ListenSync.clearPhoneHistory()
+                                cleared = true
+                            }
+                        }
+                    },
+                    width = 92.dp,
+                    height = 36.dp,
+                    active = armed,
+                    activeColor = androidx.compose.ui.graphics.Color(0xFFFF4B3E),
+                ) { CapLabel(if (armed) "¿SEGURO?" else "BORRAR", 11.sp) }
             }
         }
         Caption(stringResource(R.string.settings_about, versionName), color = Ink.TextSubtle, modifier = Modifier.align(Alignment.CenterHorizontally))

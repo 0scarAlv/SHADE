@@ -111,6 +111,19 @@ class ListenDb private constructor(context: Context) :
         listener = owner
     }
 
+    /** Empties the journal and the sync cursors; who the phone belongs to (and its link) stays. */
+    fun clearListens(cursorKeys: List<String>) {
+        val db = writableDatabase
+        db.beginTransaction()
+        try {
+            db.delete("listen", null, null)
+            cursorKeys.forEach { db.delete("meta", "key = ?", arrayOf(it)) }
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+        }
+    }
+
     /** This phone's own listens changed after [since] (local clock), oldest first. */
     fun ownChangedSince(since: Long, limit: Int): List<Listen> =
         readableDatabase.rawQuery(
