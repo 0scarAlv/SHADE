@@ -13,6 +13,7 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -77,6 +78,9 @@ class ShadeSocket(
     private val _artUpdates = MutableSharedFlow<ArtPayload>(extraBufferCapacity = 1)
     override val artUpdates: SharedFlow<ArtPayload> = _artUpdates.asSharedFlow()
 
+    private val _syncResults = MutableSharedFlow<JsonObject>(extraBufferCapacity = 4)
+    override val syncResults: SharedFlow<JsonObject> = _syncResults.asSharedFlow()
+
     override fun connect() {
         stopped = false
         openSocket()
@@ -95,6 +99,8 @@ class ShadeSocket(
         webSocket = null
         _connectionState.value = ConnectionState.DISCONNECTED
     }
+
+    override fun sendJson(text: String): Boolean = webSocket?.send(text) ?: false
 
     override fun sendCommand(action: String, value: Double?) {
         webSocket?.send(json.encodeToString(CommandMessage.serializer(), CommandMessage(action = action, value = value)))
@@ -123,6 +129,7 @@ class ShadeSocket(
                     .onSuccess { _resourceUpdates.tryEmit(it) }
                 "processes" -> runCatching { json.decodeFromJsonElement(ProcessListMessage.serializer(), element) }
                     .onSuccess { _processUpdates.tryEmit(it) }
+                "syncResult" -> _syncResults.tryEmit(element)
             }
         }
 

@@ -25,6 +25,9 @@ data class Listen(
     val isrc: String?,
     val path: String?,
     val trackKey: String,
+    val music: Boolean = true,
+    // Only meaningful for rows read back from the journal (sync cursors).
+    val updatedAt: Long = 0,
 )
 
 // Plain SQLiteOpenHelper rather than Room: no annotation processor (KSP would
@@ -82,8 +85,77 @@ class ListenDb private constructor(context: Context) :
 
     // Who is listening on this phone. Until the phone is paired with Nation the
     // listener is a local placeholder; pairing replaces it on every row.
-    val listenerId: String by lazy { metaOrCreate("listener") }
+    @Volatile private var listener: String? = null
+    val listenerId: String get() = listener ?: metaOrCreate("listener").also { listener = it }
     val deviceId: String by lazy { metaOrCreate("device") }
+
+    fun meta(key: String): String? =
+        readableDatabase.rawQuery("SELECT value FROM meta WHERE key = ?", arrayOf(key)).use { c -> if (c.moveToFirst()) c.getString(0) else null }
+
+    fun setMeta(key: String, value: String?) {
+        if (value == null) writableDatabase.delete("meta", "key = ?", arrayOf(key))
+        else writableDatabase.insertWithOnConflict("meta", null, ContentValues().apply { put("key", key); put("value", value) }, SQLiteDatabase.CONFLICT_REPLACE)
+    }
+
+    /** Pairing: this phone's listens become [owner]'s, the person Nation's journal belongs to. */
+    fun adoptListener(owner: String) {
+        val db = writableDatabase
+        db.beginTransaction()
+        try {
+            db.execSQL("UPDATE listen SET listener = ?, updated_at = ? WHERE listener = ?", arrayOf<Any>(owner, System.currentTimeMillis(), listenerId))
+            setMeta("listener", owner)
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+        }
+        listener = owner
+    }
+
+    /** This phone's own listens changed after [since] (local clock), oldest first. */
+    fun ownChangedSince(since: Long, limit: Int): List<Listen> =
+        readableDatabase.rawQuery(
+            "SELECT $COLUMNS FROM listen WHERE device = ? AND updated_at > ? ORDER BY updated_at LIMIT ?",
+            arrayOf(deviceId, since.toString(), limit.toString()),
+        ).use { c -> buildList { while (c.moveToNext()) add(c.toListen()) } }
+
+    /**
+     * Rows from Nation (the PC's listens, and this phone's own coming back).
+     * Idempotent like Nation's merge: a known row only ever grows.
+     */
+    fun mergeRemote(rows: List<Listen>) {
+        if (rows.isEmpty()) return
+        val db = writableDatabase
+        val now = System.currentTimeMillis()
+        db.beginTransaction()
+        try {
+            for (l in rows) {
+                db.execSQL(
+                    """
+                    INSERT INTO listen (id, listener, device, source, started_at, ended_at, played_ms, duration_ms,
+                                        title, artist, album, genre, isrc, path, track_key, music, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(id) DO UPDATE SET
+                        ended_at = MAX(ended_at, excluded.ended_at), played_ms = MAX(played_ms, excluded.played_ms)
+                    """.trimIndent(),
+                    arrayOf<Any?>(
+                        l.id, l.listener, l.device, l.source, l.startedAt, l.endedAt, l.playedMs, l.durationMs,
+                        l.title, l.artist, l.album, l.genre, l.isrc, l.path, l.trackKey, if (l.music) 1 else 0, now,
+                    ),
+                )
+            }
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+        }
+    }
+
+    private fun android.database.Cursor.toListen() = Listen(
+        id = getString(0), listener = getString(1), device = getString(2), source = getString(3),
+        startedAt = getLong(4), endedAt = getLong(5), playedMs = getLong(6), durationMs = getLong(7),
+        title = getString(8), artist = getString(9), album = getString(10),
+        genre = getStringOrNull(11), isrc = getStringOrNull(12), path = getStringOrNull(13),
+        trackKey = getString(14), music = getInt(15) != 0, updatedAt = getLong(16),
+    )
 
     private fun metaOrCreate(key: String): String {
         val db = writableDatabase
@@ -183,6 +255,8 @@ class ListenDb private constructor(context: Context) :
 
     companion object {
         private const val VERSION = 1
+        private const val COLUMNS = "id, listener, device, source, started_at, ended_at, played_ms, duration_ms, " +
+            "title, artist, album, genre, isrc, path, track_key, music, updated_at"
 
         @Volatile private var instance: ListenDb? = null
 

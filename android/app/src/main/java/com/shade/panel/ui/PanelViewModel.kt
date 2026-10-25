@@ -7,6 +7,7 @@ import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.shade.panel.data.ConnectionState
 import com.shade.panel.data.LyricsLine
+import com.shade.panel.music.ListenSync
 import com.shade.panel.data.ProcessEntry
 import com.shade.panel.data.ResourceMessage
 import com.shade.panel.data.ShadeBluetoothTransport
@@ -14,6 +15,7 @@ import com.shade.panel.data.ShadePreferences
 import com.shade.panel.data.ShadeSocket
 import com.shade.panel.data.ShadeTransport
 import com.shade.panel.data.Transport
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -82,6 +84,8 @@ fun panelViewModelFactory(context: Context) = viewModelFactory {
                 }
             },
             transportKind = { preferences.transport },
+            // The stats sync with Nation rides on whichever transport is active.
+            onTransport = { scope, transport -> ListenSync.bind(appContext, scope, transport) },
         )
     }
 }
@@ -89,6 +93,7 @@ fun panelViewModelFactory(context: Context) = viewModelFactory {
 class PanelViewModel(
     private val transportFactory: () -> ShadeTransport = { ShadeSocket() },
     private val transportKind: () -> Transport = { Transport.WEBSOCKET },
+    private val onTransport: (CoroutineScope, ShadeTransport) -> Unit = { _, _ -> },
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(PanelUiState())
@@ -164,6 +169,7 @@ class PanelViewModel(
         active.connect()
 
         transportJob = viewModelScope.launch {
+            onTransport(this, active)
             launch {
                 active.connectionState.collect { status ->
                     _uiState.update { it.copy(connection = status) }

@@ -19,6 +19,15 @@ public static class CommandHandler
         IClientConnection connection,
         ILogger logger)
     {
+        // The journal sync is a whole document, not a cmd; it's relayed to Nation.
+        if (json.Contains("\"sync\"") &&
+            ParseObject(json) is { } doc &&
+            doc["type"]?.GetValue<string>() == "sync")
+        {
+            await ListenSyncRelay.HandleAsync(doc, clientHub, connection, logger);
+            return;
+        }
+
         IncomingCommand? command;
         try
         {
@@ -80,6 +89,12 @@ public static class CommandHandler
                 logger.LogInformation("Acción '{Action}' desconocida.", command.Action);
                 break;
         }
+    }
+
+    private static System.Text.Json.Nodes.JsonObject? ParseObject(string json)
+    {
+        try { return System.Text.Json.Nodes.JsonNode.Parse(json) as System.Text.Json.Nodes.JsonObject; }
+        catch (JsonException) { return null; }
     }
 
     private static ProcessListMessage ToProcessListMessage(string metric, IReadOnlyList<ProcessSample> samples) =>

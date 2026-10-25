@@ -32,7 +32,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.shade.panel.music.ListenSync
 import com.shade.panel.music.MusicViewModel
+import com.shade.panel.music.SyncState
 import com.shade.panel.music.StatsEntry
 import com.shade.panel.music.StatsPeriod
 import com.shade.panel.ui.theme.Manrope
@@ -70,8 +72,12 @@ fun StatsPane(vm: MusicViewModel, bottomPadding: Dp, modifier: Modifier = Modifi
     }
     val topHours = entries.firstOrNull()?.hours ?: 0.0
 
+    val sync by ListenSync.state.collectAsState()
+
     LazyColumn(modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = bottomPadding)) {
         item {
+            NationStrip(sync)
+            Spacer(Modifier.height(12.dp))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 StatsPeriod.entries.forEach { p ->
                     KeyButton(onClick = { vm.setStatsPeriod(p) }, modifier = Modifier.weight(1f), width = 1000.dp, height = 36.dp, active = p == period) {
@@ -85,6 +91,14 @@ fun StatsPane(vm: MusicViewModel, bottomPadding: Dp, modifier: Modifier = Modifi
                 Kpi(value, unit, Modifier.weight(1.2f))
                 Kpi(stats.plays.toString(), "Plays", Modifier.weight(1f))
                 Kpi(stats.listens.toString(), "Escuchas", Modifier.weight(1f))
+            }
+            if (sync.linked && stats.hours > 0) {
+                Spacer(Modifier.height(6.dp))
+                Caption(
+                    "Teléfono ${hoursText(stats.phoneHours)} · PC ${hoursText(stats.hours - stats.phoneHours)}",
+                    color = Ink.TextSubtle,
+                    modifier = Modifier.padding(start = 4.dp),
+                )
             }
             Spacer(Modifier.height(10.dp))
             DisplayPanel(Modifier.fillMaxWidth(), contentPadding = 12.dp) {
@@ -129,6 +143,52 @@ fun StatsPane(vm: MusicViewModel, bottomPadding: Dp, modifier: Modifier = Modifi
         itemsIndexed(entries, key = { i, e -> "$section:$i:${e.name}" }) { i, entry ->
             RankRow(i + 1, entry, if (topHours > 0) (entry.hours / topHours).toFloat() else 0f)
         }
+    }
+}
+
+// Link with Nation: the one-time question, then the sync status with a key to sync now.
+@Composable
+private fun NationStrip(sync: SyncState) {
+    val ask = sync.askToLink
+    if (ask != null) {
+        DisplayPanel(Modifier.fillMaxWidth(), contentPadding = 14.dp) {
+            Column {
+                DotText("NATION · ${ask.name.uppercase()}", 14.sp, weight = FontWeight.Black)
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    "¿Este teléfono es de ${ask.name}? Al vincularlo, tus escuchas del teléfono y las del PC se juntan en las mismas estadísticas.",
+                    style = TextStyle(fontFamily = Manrope, fontSize = 13.sp, color = Ink.TextMuted),
+                )
+                Spacer(Modifier.height(10.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    KeyButton(onClick = ListenSync::acceptLink, width = 120.dp, height = 38.dp, active = true) { CapLabel("VINCULAR", 11.sp) }
+                    KeyButton(onClick = ListenSync::declineLink, width = 80.dp, height = 38.dp) { CapLabel("NO", 11.sp) }
+                }
+            }
+        }
+        return
+    }
+    val status = when {
+        sync.syncing -> "Sincronizando con Nation…"
+        sync.message != null -> sync.message
+        sync.linked && sync.lastSyncAt > 0 -> "Nation · ${sync.ownerName.orEmpty()} · ${ago(sync.lastSyncAt)}"
+        sync.linked -> "Nation · ${sync.ownerName.orEmpty()} · conecta el teléfono al PC"
+        else -> "Conecta el teléfono al PC con Nation abierto para juntar estadísticas"
+    }
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Dot(on = sync.linked && sync.message == null, size = 6.dp)
+        Spacer(Modifier.width(8.dp))
+        Caption(status, color = Ink.TextMuted, size = 9.sp, modifier = Modifier.weight(1f))
+        KeyButton(onClick = ListenSync::syncNow, width = 56.dp, height = 30.dp, active = sync.syncing) { CapLabel("SYNC", 10.sp) }
+    }
+}
+
+private fun ago(at: Long): String {
+    val min = ((System.currentTimeMillis() - at) / 60_000).toInt()
+    return when {
+        min < 1 -> "al día"
+        min < 60 -> "hace $min min"
+        else -> "hace ${min / 60} h"
     }
 }
 

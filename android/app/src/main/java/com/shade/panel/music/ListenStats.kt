@@ -19,6 +19,8 @@ data class StatsSummary(
     val genres: List<StatsEntry>,
     val songs: List<StatsEntry>,
     val byHour: DoubleArray,
+    /** Of [hours], how much played on this phone (the rest came from Nation's other devices). */
+    val phoneHours: Double = 0.0,
 ) {
     val isEmpty get() = listens == 0
 
@@ -56,12 +58,14 @@ object ListenStats {
         val songs = HashMap<String, Acc>()
         val byHour = DoubleArray(24)
         var totalMs = 0.0
+        var phoneMs = 0.0
+        val phone = db.deviceId
         var listens = 0
         var plays = 0
         val zone = ZoneId.systemDefault()
 
         db.readableDatabase.rawQuery(
-            "SELECT artist, title, genre, played_ms, duration_ms, started_at, track_key FROM listen WHERE started_at >= ? AND music = 1",
+            "SELECT artist, title, genre, played_ms, duration_ms, started_at, track_key, device FROM listen WHERE started_at >= ? AND music = 1",
             arrayOf(since.toString()),
         ).use { c ->
             while (c.moveToNext()) {
@@ -73,6 +77,7 @@ object ListenStats {
                 listens++
                 if (play) plays++
                 totalMs += played
+                if (c.getString(7) == phone) phoneMs += played
                 val hour = java.time.Instant.ofEpochMilli(c.getLong(5)).atZone(zone).hour
                 byHour[hour] += played / 3_600_000.0
 
@@ -83,7 +88,10 @@ object ListenStats {
                 add(songs, c.getString(6), title, artist, played, play)
             }
         }
-        return StatsSummary(period, totalMs / 3_600_000.0, listens, plays, rank(artists, top), rank(genres, top), rank(songs, top), byHour)
+        return StatsSummary(
+            period, totalMs / 3_600_000.0, listens, plays, rank(artists, top), rank(genres, top), rank(songs, top), byHour,
+            phoneHours = phoneMs / 3_600_000.0,
+        )
     }
 
     private class Acc(val name: String, val detail: String?) {

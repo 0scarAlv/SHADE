@@ -23,6 +23,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -76,6 +77,9 @@ class ShadeBluetoothTransport(
     private val _artUpdates = MutableSharedFlow<ArtPayload>(extraBufferCapacity = 1)
     override val artUpdates: SharedFlow<ArtPayload> = _artUpdates.asSharedFlow()
 
+    private val _syncResults = MutableSharedFlow<JsonObject>(extraBufferCapacity = 4)
+    override val syncResults: SharedFlow<JsonObject> = _syncResults.asSharedFlow()
+
     override fun connect() {
         connectJob?.cancel()
         connectJob = scope.launch { connectLoop() }
@@ -89,6 +93,18 @@ class ShadeBluetoothTransport(
         runCatching { socket?.close() }
         socket = null
         _connectionState.value = ConnectionState.DISCONNECTED
+    }
+
+    override fun sendJson(text: String): Boolean {
+        val activeSocket = socket ?: return false
+        scope.launch {
+            try {
+                writeMutex.withLock { FrameCodec.writeFrame(activeSocket.outputStream, FrameCodec.TYPE_JSON, text.toByteArray(Charsets.UTF_8)) }
+            } catch (e: IOException) {
+                // The read loop will notice the closed/broken socket and reconnect.
+            }
+        }
+        return true
     }
 
     override fun sendCommand(action: String, value: Double?) {
@@ -188,6 +204,7 @@ class ShadeBluetoothTransport(
                 .onSuccess { _resourceUpdates.tryEmit(it) }
             "processes" -> runCatching { json.decodeFromJsonElement(ProcessListMessage.serializer(), element) }
                 .onSuccess { _processUpdates.tryEmit(it) }
+            "syncResult" -> _syncResults.tryEmit(element)
         }
     }
 

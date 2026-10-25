@@ -58,6 +58,8 @@ var metadataProvider = app.Services.GetRequiredService<TrackMetadataProvider>();
 var rfcommServer = app.Services.GetRequiredService<RfcommServer>();
 var resourceMonitor = app.Services.GetRequiredService<ResourceMonitorService>();
 var logger = app.Services.GetRequiredService<ILogger<Program>>();
+// Nation answers the phone's stats sync on the same port the Tauon bridge polls.
+ListenSyncRelay.Configure(app.Configuration.GetValue("Tauon:Port", 7814));
 
 string? lastLyricsKey = null;
 LyricsMessage? currentLyrics = null;

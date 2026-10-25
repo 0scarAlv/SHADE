@@ -2,6 +2,7 @@ package com.shade.panel.data
 
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.serialization.json.JsonObject
 
 // Common surface for both ways of reaching the agent (WebSocket-over-adb-reverse
 // and Bluetooth RFCOMM), so PanelViewModel doesn't care which one is active.
@@ -18,9 +19,16 @@ interface ShadeTransport {
     // art over HTTP instead, so ShadeSocket's flow simply never fires.
     val artUpdates: SharedFlow<ArtPayload>
 
+    // Answers to the stats sync (see ListenSync), kept as raw JSON: the
+    // listens inside go straight into the journal.
+    val syncResults: SharedFlow<JsonObject>
+
     fun connect()
     fun disconnect()
     fun sendCommand(action: String, value: Double? = null)
+
+    /** Sends an already-built message (the stats sync); false when not connected. */
+    fun sendJson(text: String): Boolean
 }
 
 data class ArtPayload(
