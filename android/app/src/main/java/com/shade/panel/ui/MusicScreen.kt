@@ -7,7 +7,6 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -35,6 +34,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
@@ -57,6 +57,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
@@ -88,6 +89,8 @@ import kotlin.math.roundToInt
 
 private val MINI_HEIGHT = 76.dp
 private val QUEUE_SWIPE = 96.dp
+private val SKIP_SWIPE = 64.dp
+private val SCREEN_PADDING = 20.dp
 
 private enum class PlayerView { ART, LYRICS, QUEUE }
 
@@ -116,10 +119,9 @@ fun MusicScreen(vm: MusicViewModel, onOpenDeck: () -> Unit) {
     val auto by animateColorAsState(palette.accent, tween(900), label = "musicInk")
     val ink = if (settings.inkColor == InkColor.AUTO && now.hasTrack) auto else LocalInk.current
 
-    val scope = rememberCoroutineScope()
     // 0 = mini player, 1 = full player.
-    val expand = remember { Animatable(0f) }
-    BackHandler(enabled = expand.targetValue > 0.5f) { scope.launch { expand.animateTo(0f) } }
+    val expand = rememberDragValue()
+    BackHandler(enabled = expand.target > 0.5f) { expand.animateTo(0f) }
 
     CompositionLocalProvider(LocalInk provides ink) {
         ScreenBase(Modifier.fillMaxSize()) {
@@ -127,7 +129,7 @@ fun MusicScreen(vm: MusicViewModel, onOpenDeck: () -> Unit) {
                 Modifier
                     .fillMaxSize()
                     .windowInsetsPadding(WindowInsets.safeDrawing)
-                    .padding(horizontal = 20.dp, vertical = 18.dp),
+                    .padding(horizontal = SCREEN_PADDING, vertical = 18.dp),
             ) {
                 val sheetHeight = maxHeight
                 Column(Modifier.fillMaxSize()) {
@@ -137,14 +139,12 @@ fun MusicScreen(vm: MusicViewModel, onOpenDeck: () -> Unit) {
                 }
                 if (hasAccess && now.hasTrack) {
                     PlayerSheet(now, vm, expand.value, sheetHeight, onDrag = { fraction ->
-                        scope.launch { expand.snapTo((expand.value - fraction).coerceIn(0f, 1f)) }
+                        expand.snapTo((expand.value - fraction).coerceIn(0f, 1f))
                     }, onSettle = { velocityUp ->
-                        scope.launch {
-                            val open = if (velocityUp != 0f) velocityUp > 0f else expand.value > 0.5f
-                            expand.animateTo(if (open) 1f else 0f, spring(stiffness = 500f))
-                        }
+                        val open = if (velocityUp != 0f) velocityUp > 0f else expand.value > 0.5f
+                        expand.animateTo(if (open) 1f else 0f, spring(stiffness = 500f))
                     }, onToggle = {
-                        scope.launch { expand.animateTo(if (expand.value > 0.5f) 0f else 1f, spring(stiffness = 500f)) }
+                        expand.animateTo(if (expand.value > 0.5f) 0f else 1f, spring(stiffness = 500f))
                     })
                 }
             }
@@ -237,9 +237,8 @@ private fun ColumnScope.Library(vm: MusicViewModel, now: NowPlaying) {
 private fun SongRow(song: Song, current: Boolean, queuedAt: Int?, onClick: () -> Unit, onQueue: () -> Unit) {
     val ink = LocalInk.current
     val haptics = LocalHapticFeedback.current
-    val scope = rememberCoroutineScope()
     val limitPx = with(LocalDensity.current) { QUEUE_SWIPE.toPx() }
-    val offset = remember { Animatable(0f) }
+    val offset = rememberDragValue()
     val pull = (-offset.value / limitPx).coerceIn(0f, 1f)
 
     Box(Modifier.fillMaxWidth()) {
@@ -259,7 +258,7 @@ private fun SongRow(song: Song, current: Boolean, queuedAt: Int?, onClick: () ->
                 .draggable(
                     orientation = Orientation.Horizontal,
                     state = rememberDraggableState { delta ->
-                        scope.launch { offset.snapTo((offset.value + delta).coerceIn(-limitPx * 1.3f, 0f)) }
+                        offset.snapTo((offset.value + delta).coerceIn(-limitPx * 1.3f, 0f))
                     },
                     onDragStopped = {
                         if (offset.value <= -limitPx) {
@@ -340,10 +339,12 @@ private fun PlayerSheet(
 
 @Composable
 private fun MiniPlayer(now: NowPlaying, vm: MusicViewModel, onOpen: () -> Unit, modifier: Modifier) {
-    Box(modifier.fillMaxWidth().height(MINI_HEIGHT).clickableNoRipple(onOpen)) {
+    // Sideways on the mini player skips too; the song info slides with the finger.
+    val (swipe, trackSwipe) = rememberTrackSwipe(vm)
+    Box(modifier.fillMaxWidth().height(MINI_HEIGHT).then(trackSwipe).clickableNoRipple(onOpen)) {
         DisplayPanel(Modifier.fillMaxSize(), contentPadding = 10.dp) {
             Column {
-                Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
+                Row(Modifier.weight(1f).graphicsLayer { translationX = swipe.value }, verticalAlignment = Alignment.CenterVertically) {
                     ArtImage(now.artUri, Modifier.size(46.dp), shape = RoundedCornerShape(8.dp))
                     Spacer(Modifier.width(12.dp))
                     Column(Modifier.weight(1f)) {
@@ -375,28 +376,10 @@ private fun MiniPlayer(now: NowPlaying, vm: MusicViewModel, onOpen: () -> Unit, 
 private fun FullPlayer(now: NowPlaying, vm: MusicViewModel, onCollapse: () -> Unit, modifier: Modifier) {
     var view by rememberSaveable { mutableStateOf(PlayerView.ART) }
     val toggle = { target: PlayerView -> view = if (view == target) PlayerView.ART else target }
-    // Swipe the cover (or lyrics) sideways: left = next song, right = previous.
-    // Not on the queue view, where a sideways slip while browsing shouldn't skip.
-    val haptics = LocalHapticFeedback.current
-    val scope = rememberCoroutineScope()
-    val skipPx = with(LocalDensity.current) { 80.dp.toPx() }
-    val swipe = remember { Animatable(0f) }
-    val trackSwipe = if (view == PlayerView.QUEUE) Modifier else Modifier.pointerInput(Unit) {
-        detectHorizontalDragGestures(
-            onDragEnd = {
-                val dx = swipe.value
-                if (dx <= -skipPx || dx >= skipPx) {
-                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                    if (dx < 0) vm.next() else vm.previousTrack()
-                }
-                scope.launch { swipe.animateTo(0f, spring(stiffness = 500f)) }
-            },
-            onDragCancel = { scope.launch { swipe.animateTo(0f) } },
-        ) { change, delta ->
-            change.consume()
-            scope.launch { swipe.snapTo((swipe.value + delta).coerceIn(-skipPx * 1.6f, skipPx * 1.6f)) }
-        }
-    }
+    // Swipe the cover (or lyrics) sideways to skip. Not on the queue view,
+    // where a sideways slip while browsing shouldn't change the song.
+    val (swipe, trackSwipe) = rememberTrackSwipe(vm, enabled = view != PlayerView.QUEUE)
+    val skipPx = with(LocalDensity.current) { SKIP_SWIPE.toPx() }
 
     BoxWithConstraints(modifier.fillMaxSize()) {
         val header = @Composable {
@@ -414,6 +397,7 @@ private fun FullPlayer(now: NowPlaying, vm: MusicViewModel, onCollapse: () -> Un
                 }
             }
         }
+        val bleed = if (maxWidth > maxHeight) 0.dp else SCREEN_PADDING * 2
         val media = @Composable { m: Modifier ->
             Box(
                 m.then(trackSwipe).graphicsLayer {
@@ -423,13 +407,14 @@ private fun FullPlayer(now: NowPlaying, vm: MusicViewModel, onCollapse: () -> Un
                 contentAlignment = Alignment.Center,
             ) {
                 when (view) {
+                    // Square and square-cornered; in portrait it runs edge to edge, past the screen padding.
                     PlayerView.ART -> BoxWithConstraints(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         ArtImage(
                             now.artUri,
                             Modifier
-                                .size(min(maxWidth, maxHeight))
+                                .requiredSize(min(maxWidth + bleed, maxHeight))
                                 .pointerInput(Unit) { detectTapGestures(onDoubleTap = { toggle(PlayerView.LYRICS) }) },
-                            shape = RoundedCornerShape(16.dp),
+                            shape = RectangleShape,
                         )
                     }
                     PlayerView.LYRICS -> DisplayPanel(
@@ -607,6 +592,32 @@ private fun QueueRow(entry: QueueEntry, vm: MusicViewModel) {
             KeyButton(onClick = { vm.removeAt(entry.index) }, width = 36.dp, height = 30.dp, contentDescription = "Quitar de la cola") { CapLabel("×", 13.sp) }
         }
     }
+}
+
+// Horizontal drag that skips: left = next song, right = previous. Returns the
+// live offset (for the content to follow the finger) and the gesture modifier.
+@Composable
+private fun rememberTrackSwipe(vm: MusicViewModel, enabled: Boolean = true): Pair<DragValue, Modifier> {
+    val haptics = LocalHapticFeedback.current
+    val skipPx = with(LocalDensity.current) { SKIP_SWIPE.toPx() }
+    val swipe = rememberDragValue()
+    val modifier = if (!enabled) Modifier else Modifier.pointerInput(Unit) {
+        detectHorizontalDragGestures(
+            onDragEnd = {
+                val dx = swipe.value
+                if (dx <= -skipPx || dx >= skipPx) {
+                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                    if (dx < 0) vm.next() else vm.previousTrack()
+                }
+                swipe.animateTo(0f, spring(stiffness = 500f))
+            },
+            onDragCancel = { swipe.animateTo(0f) },
+        ) { change, delta ->
+            change.consume()
+            swipe.snapTo((swipe.value + delta).coerceIn(-skipPx * 1.6f, skipPx * 1.6f))
+        }
+    }
+    return swipe to modifier
 }
 
 private val NowPlaying.fraction get() = if (durationMs > 0) (positionMs.toFloat() / durationMs).coerceIn(0f, 1f) else 0f

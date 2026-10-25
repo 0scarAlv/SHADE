@@ -176,13 +176,21 @@ class MusicViewModel(app: Application) : AndroidViewModel(app) {
         controller?.pause()
     }
 
-    fun next() { controller?.seekToNextMediaItem() }
+    // Skipping means "play that one", even from pause.
+    fun next() = skip { it.seekToNextMediaItem() }
 
     // Like most players: past the first seconds "previous" restarts the song.
-    fun previous() { controller?.seekToPrevious() }
+    fun previous() = skip { it.seekToPrevious() }
 
     // The swipe always means the song before, never "restart this one".
-    fun previousTrack() { controller?.seekToPreviousMediaItem() }
+    fun previousTrack() = skip { it.seekToPreviousMediaItem() }
+
+    private inline fun skip(move: (MediaController) -> Unit) {
+        val c = controller ?: return
+        move(c)
+        if (c.playbackState == Player.STATE_IDLE) c.prepare()
+        c.play()
+    }
 
     fun seekTo(fraction: Float) {
         val c = controller ?: return

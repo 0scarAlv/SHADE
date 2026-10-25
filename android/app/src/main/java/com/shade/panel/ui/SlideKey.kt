@@ -1,6 +1,8 @@
 package com.shade.panel.ui
 
-import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.AnimationSpec
+import androidx.compose.animation.core.animate
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -15,6 +17,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
@@ -34,6 +38,8 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
@@ -50,14 +56,13 @@ fun SlideKey(
     towardsStart: Boolean = false,
 ) {
     val haptics = LocalHapticFeedback.current
-    val scope = rememberCoroutineScope()
     val currentOnSlide by rememberUpdatedState(onSlide)
     val ink = LocalInk.current
     val shape = RoundedCornerShape(12.dp)
     val thumb = height - 8.dp
     val travelPx = with(LocalDensity.current) { (width - thumb - 8.dp).toPx() }
     // 0 = at rest, 1 = slid all the way.
-    val progress = remember { Animatable(0f) }
+    val progress = rememberDragValue()
 
     Box(
         modifier
@@ -74,14 +79,17 @@ fun SlideKey(
                 orientation = Orientation.Horizontal,
                 state = rememberDraggableState { delta ->
                     val step = (if (towardsStart) -delta else delta) / travelPx
-                    scope.launch { progress.snapTo((progress.value + step).coerceIn(0f, 1f)) }
+                    progress.snapTo((progress.value + step).coerceIn(0f, 1f))
                 },
-                onDragStopped = {
-                    if (progress.value > 0.85f) {
+                onDragStopped = { velocity ->
+                    // Past halfway, or a quick flick that got a quarter of the way.
+                    val fling = if (towardsStart) -velocity else velocity
+                    if (progress.value > 0.55f || (fling > 1200f && progress.value > 0.2f)) {
                         haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                        progress.animateTo(1f)
-                        currentOnSlide()
-                        progress.snapTo(0f)
+                        progress.animateTo(1f, tween(120)) {
+                            currentOnSlide()
+                            progress.snapTo(0f)
+                        }
                     } else {
                         progress.animateTo(0f, spring(stiffness = 600f))
                     }
@@ -114,4 +122,39 @@ fun SlideKey(
             Dot(on = true, color = Ink.Text, size = 5.dp)
         }
     }
+}
+
+// A value a finger drags directly and that springs back on release. Drag
+// deltas must land synchronously: with Animatable.snapTo launched per event,
+// a quick swipe ended before its deltas were applied and never crossed the
+// threshold.
+class DragValue internal constructor(private val scope: CoroutineScope) {
+    var value by mutableFloatStateOf(0f)
+        private set
+
+    /** Where it's headed (the end of a running animation, else where it is). */
+    var target by mutableFloatStateOf(0f)
+        private set
+    private var job: Job? = null
+
+    fun snapTo(v: Float) {
+        job?.cancel()
+        value = v
+        target = v
+    }
+
+    fun animateTo(to: Float, spec: AnimationSpec<Float> = spring(), then: () -> Unit = {}) {
+        job?.cancel()
+        target = to
+        job = scope.launch {
+            animate(value, to, animationSpec = spec) { v, _ -> value = v }
+            then()
+        }
+    }
+}
+
+@Composable
+fun rememberDragValue(): DragValue {
+    val scope = rememberCoroutineScope()
+    return remember { DragValue(scope) }
 }
