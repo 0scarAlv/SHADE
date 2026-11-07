@@ -26,11 +26,19 @@ data class Song(
     val durationMs: Long,
     val genre: String?,
     val isrc: String?,
+    // MediaStore TRACK: disc * 1000 + track (0 when unknown), so it sorts disc-then-track.
+    val trackNo: Int = 0,
+    // Seconds since epoch (MediaStore DATE_ADDED, file modified time as fallback).
+    val dateAdded: Long = 0,
 ) {
     // The file itself: AudioArtFetcher pulls the embedded cover out of it.
     val artUri: Uri get() = uri
 
     // Folded once for search and for the cross-device song key.
+    // Folded once for sorting.
+    val titleKey: String by lazy { fold(title) }
+    val albumKey: String by lazy { fold(album) }
+
     val searchKey: String by lazy { fold("$title $artist $album") }
 }
 
@@ -87,6 +95,8 @@ class MusicLibrary private constructor(private val context: Context) {
             add(MediaStore.Audio.Media.DURATION)
             add(MediaStore.Audio.Media.SIZE)
             add(MediaStore.Audio.Media.DATE_MODIFIED)
+            add(MediaStore.Audio.Media.DATE_ADDED)
+            add(MediaStore.Audio.Media.TRACK)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) add(MediaStore.Audio.Media.GENRE)
         }.toTypedArray()
 
@@ -99,6 +109,7 @@ class MusicLibrary private constructor(private val context: Context) {
             val genreCol = c.getColumnIndex(MediaStore.Audio.Media.GENRE)
             while (c.moveToNext()) {
                 val id = c.getLong(0)
+                val modifiedSec = c.getLong(8)
                 val artist = c.getString(3)?.takeUnless { it == MediaStore.UNKNOWN_STRING } ?: "Desconocido"
                 rows += Row(
                     Song(
@@ -112,6 +123,8 @@ class MusicLibrary private constructor(private val context: Context) {
                         durationMs = c.getLong(6),
                         genre = if (genreCol >= 0) c.getString(genreCol) else null,
                         isrc = null,
+                        trackNo = c.getInt(10),
+                        dateAdded = c.getLong(9).takeIf { it > 0 } ?: modifiedSec,
                     ),
                     size = c.getLong(7),
                     modified = c.getLong(8),

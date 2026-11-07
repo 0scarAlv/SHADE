@@ -18,7 +18,11 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
@@ -42,6 +46,21 @@ data class NowPlaying(
     val hasTrack get() = mediaId != null
 }
 
+/** Order of the song list (and so of the play order built from it). */
+enum class SongSort(val label: String) {
+    TITLE("A–Z"),
+    ALBUM("ÁLBUM"),
+    RECENT("RECIENTES");
+
+    fun next() = entries[(ordinal + 1) % entries.size]
+
+    fun sorted(all: List<Song>): List<Song> = when (this) {
+        TITLE -> all.sortedBy { it.titleKey }
+        ALBUM -> all.sortedWith(compareBy<Song> { it.albumKey }.thenBy { it.trackNo }.thenBy { it.titleKey })
+        RECENT -> all.sortedWith(compareByDescending<Song> { it.dateAdded }.thenBy { it.titleKey })
+    }
+}
+
 /** One upcoming item of the player's list; [queued] = added by hand ("a la cola"). */
 data class QueueEntry(
     val index: Int,
@@ -60,10 +79,19 @@ data class QueueEntry(
 // and whatever was queued before it", shuffled or not.
 class MusicViewModel(app: Application) : AndroidViewModel(app) {
     private val library = MusicLibrary.get(app)
-    val songs: StateFlow<List<Song>> = library.songs
     val loading: StateFlow<Boolean> = library.loading
 
     private val prefs = app.getSharedPreferences("shade_music", Context.MODE_PRIVATE)
+
+    private val _sort = MutableStateFlow(
+        runCatching { SongSort.valueOf(prefs.getString(KEY_SORT, null) ?: "") }.getOrDefault(SongSort.TITLE),
+    )
+    val sort: StateFlow<SongSort> = _sort.asStateFlow()
+
+    // The library in the chosen order; the list shown and the play order both come from here.
+    val songs: StateFlow<List<Song>> = combine(library.songs, _sort) { all, sort -> sort.sorted(all) }
+        .flowOn(Dispatchers.Default)
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
     private var shuffle = prefs.getBoolean(KEY_SHUFFLE, false)
 
     private val _now = MutableStateFlow(NowPlaying(shuffle = shuffle))
@@ -85,15 +113,33 @@ class MusicViewModel(app: Application) : AndroidViewModel(app) {
     private var controllerFuture: ListenableFuture<MediaController>? = null
     private var controller: MediaController? = null
     private var ticker: Job? = null
+    private var saver: Job? = null
+    private var restored = false
 
     private val listener = object : Player.Listener {
         override fun onEvents(player: Player, events: Player.Events) {
             publish(player)
             if (events.containsAny(Player.EVENT_TIMELINE_CHANGED, Player.EVENT_MEDIA_ITEM_TRANSITION)) publishQueue(player)
+            if (restored) {
+                if (events.containsAny(Player.EVENT_TIMELINE_CHANGED, Player.EVENT_MEDIA_ITEM_TRANSITION)) saveQueue(player)
+                if (events.containsAny(Player.EVENT_MEDIA_ITEM_TRANSITION, Player.EVENT_IS_PLAYING_CHANGED)) savePosition(player)
+                if (player.isPlaying && saver?.isActive != true) {
+                    saver = viewModelScope.launch {
+                        while (isActive && controller?.isPlaying == true) {
+                            delay(SAVE_EVERY_MS)
+                            controller?.let(::savePosition)
+                        }
+                    }
+                }
+            }
         }
     }
 
     init {
+        // Once the library is in, bring back the last song (paused) if nothing is loaded yet.
+        viewModelScope.launch {
+            library.songs.collect { if (it.isNotEmpty()) tryRestore() }
+        }
         // New rows from Nation (or this phone's own, pushed) → re-read the stats.
         viewModelScope.launch {
             ListenSync.state.map { it.revision }.distinctUntilChanged().collect { refreshStats() }
@@ -115,8 +161,86 @@ class MusicViewModel(app: Application) : AndroidViewModel(app) {
                 c.addListener(listener)
                 publish(c)
                 publishQueue(c)
+                tryRestore()
             }, MoreExecutors.directExecutor())
         }
+    }
+
+    fun setSort(sort: SongSort) {
+        _sort.value = sort
+        prefs.edit { putString(KEY_SORT, sort.name) }
+    }
+
+    // ---- last-song memory
+
+    // Puts the saved queue back into the player, paused at the saved position.
+    // Runs once, when both the library and the controller are ready; a service that
+    // already holds a session (queue not empty) is left untouched.
+    private fun tryRestore() {
+        if (restored) return
+        val c = controller ?: return
+        val all = library.songs.value
+        if (all.isEmpty()) return
+        restored = true
+        if (c.mediaItemCount > 0) return
+        val lastId = prefs.getLong(KEY_LAST_ID, -1L)
+        if (lastId < 0) return
+        val byId = all.associateBy { it.id }
+        if (byId[lastId] == null) return
+        val items = ArrayList<MediaItem>()
+        var start = -1
+        val saved = prefs.getString(KEY_QUEUE, null)
+        val savedIndex = prefs.getInt(KEY_QUEUE_INDEX, -1)
+        if (!saved.isNullOrEmpty()) {
+            saved.split(',').forEachIndexed { i, token ->
+                val queued = token.endsWith("q")
+                val song = byId[token.removeSuffix("q").toLongOrNull() ?: return@forEachIndexed] ?: return@forEachIndexed
+                if (i == savedIndex && song.id == lastId) start = items.size
+                items += song.toMediaItem(queued = queued)
+            }
+        }
+        if (start < 0) {
+            // No usable saved queue: fall back to the library around the song.
+            items.clear()
+            val ordered = songs.value.ifEmpty { all }
+            start = ordered.indexOfFirst { it.id == lastId }.coerceAtLeast(0)
+            ordered.mapTo(items) { it.toMediaItem() }
+        }
+        c.setMediaItems(items, start, prefs.getLong(KEY_LAST_POS, 0L).coerceAtLeast(0))
+        c.prepare()
+        c.pause()
+    }
+
+    private fun saveQueue(p: Player) {
+        if (p.currentMediaItem == null) return
+        val sb = StringBuilder()
+        for (i in 0 until p.mediaItemCount) {
+            if (i > 0) sb.append(',')
+            val item = p.getMediaItemAt(i)
+            sb.append(item.mediaId)
+            if (item.isQueued) sb.append('q')
+        }
+        prefs.edit {
+            putString(KEY_QUEUE, sb.toString())
+            putInt(KEY_QUEUE_INDEX, p.currentMediaItemIndex)
+        }
+    }
+
+    private fun savePosition(p: Player) {
+        val id = p.currentMediaItem?.mediaId?.toLongOrNull() ?: return
+        prefs.edit {
+            putLong(KEY_LAST_ID, id)
+            putLong(KEY_LAST_POS, p.currentPosition.coerceAtLeast(0))
+            putInt(KEY_QUEUE_INDEX, p.currentMediaItemIndex)
+        }
+    }
+
+    /** Call when the app goes to the background. */
+    fun saveState() {
+        val c = controller ?: return
+        if (!restored) return
+        saveQueue(c)
+        savePosition(c)
     }
 
     fun setStatsPeriod(period: StatsPeriod) {
@@ -343,6 +467,7 @@ class MusicViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     override fun onCleared() {
+        saveState()
         controller?.removeListener(listener)
         controllerFuture?.let { MediaController.releaseFuture(it) }
         super.onCleared()
@@ -350,6 +475,12 @@ class MusicViewModel(app: Application) : AndroidViewModel(app) {
 
     private companion object {
         const val KEY_SHUFFLE = "shuffle"
+        const val KEY_SORT = "sort"
+        const val KEY_LAST_ID = "last_id"
+        const val KEY_LAST_POS = "last_pos"
+        const val KEY_QUEUE = "last_queue"
+        const val KEY_QUEUE_INDEX = "last_queue_index"
+        const val SAVE_EVERY_MS = 5_000L
         const val MAX_UP_NEXT = 300
     }
 }

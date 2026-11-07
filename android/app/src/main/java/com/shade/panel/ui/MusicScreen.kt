@@ -46,6 +46,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -74,6 +75,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.min
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.LifecycleOwner
 import androidx.media3.common.Player
 import com.shade.panel.R
 import com.shade.panel.music.LocalSpectrum
@@ -113,6 +117,13 @@ fun MusicScreen(vm: MusicViewModel, onOpenDeck: () -> Unit) {
     }.toTypedArray()
     LaunchedEffect(Unit) { if (!hasAccess) request.launch(wanted) }
     LaunchedEffect(hasAccess) { if (hasAccess) vm.start() }
+    // Remember the last song when the app leaves the screen.
+    DisposableEffect(context) {
+        val owner = context as? LifecycleOwner
+        val observer = LifecycleEventObserver { _, event -> if (event == Lifecycle.Event.ON_STOP) vm.saveState() }
+        owner?.lifecycle?.addObserver(observer)
+        onDispose { owner?.lifecycle?.removeObserver(observer) }
+    }
 
     val now by vm.now.collectAsState()
     // Like the clock, this screen takes its ink from the cover of what it's playing (when ink is on AUTO).
@@ -171,6 +182,7 @@ private fun NoAccess(onAsk: () -> Unit) {
 private fun ColumnScope.Library(vm: MusicViewModel, now: NowPlaying) {
     val songs by vm.songs.collectAsState()
     val loading by vm.loading.collectAsState()
+    val sort by vm.sort.collectAsState()
     val upNext by vm.upNext.collectAsState()
     // Queue slot of each hand-queued song, for the badge on its row.
     val queuedAt = remember(upNext) {
@@ -193,6 +205,10 @@ private fun ColumnScope.Library(vm: MusicViewModel, now: NowPlaying) {
             DotText("STATS", 15.sp, weight = FontWeight.Black, lit = tab == LibraryTab.STATS, modifier = Modifier.clickableNoRipple { tab = LibraryTab.STATS })
         }
         if (tab == LibraryTab.SONGS) {
+            KeyButton(onClick = { vm.setSort(sort.next()) }, width = 92.dp, height = 40.dp, contentDescription = "Ordenar lista") {
+                CapLabel(sort.label, 10.sp)
+            }
+            Spacer(Modifier.width(8.dp))
             KeyButton(onClick = vm::shuffleAll, width = 64.dp, height = 40.dp, active = now.shuffle) { CapLabel("MIX", 11.sp) }
         }
     }
