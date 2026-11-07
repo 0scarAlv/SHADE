@@ -99,7 +99,7 @@ public sealed class LyricsProvider
     }
 
     // Lyrics that came from somewhere else (e.g. a file's own tags via the
-    // Tauon API): synced if it has LRC timestamps, plain text otherwise.
+    // Nation API): synced if it has LRC timestamps, plain text otherwise.
     public static LyricsResult? FromRaw(string raw)
     {
         var lines = ParseLrc(raw);

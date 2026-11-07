@@ -241,7 +241,7 @@ public sealed class SmtcSessionWatcher : IAsyncDisposable, IPlaybackControl
             var playing = playback.PlaybackStatus == GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing;
 
             // Players that publish no timeline at all (EndTime and Position
-            // both zero, e.g. Tauon) would otherwise pin the panel's progress
+            // both zero, e.g. some players) would otherwise pin the panel's progress
             // at 0:00 — fall back to counting played time ourselves.
             var hasTimeline = timeline.EndTime > TimeSpan.Zero || timeline.Position > TimeSpan.Zero;
             var state = new PlaybackState(

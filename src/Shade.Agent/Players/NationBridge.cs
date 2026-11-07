@@ -4,15 +4,14 @@ using Shade.Agent.Smtc;
 
 namespace Shade.Agent.Players;
 
-// Talks to Tauon Music Box's local remote-control API (port 7814, enabled in
-// Tauon under Menu > Settings > Connections). Tauon publishes almost nothing
-// to SMTC — no art, album, duration or position — but this API exposes all
-// of it straight from the user's files, plus the lyrics embedded in them and
-// real seek/shuffle/repeat control. Polled; when Tauon is closed or the API
+// Talks to Nation's local remote-control API (port 7814, served by Nation's
+// own NationRemoteServer). Nation's SMTC session lacks some data, but this API
+// exposes art, album, duration and position, plus the lyrics it found and
+// real seek/shuffle/repeat control. Polled; when Nation is closed or the API
 // is off, Available goes false and the agent falls back to SMTC.
-public sealed class TauonBridge : BackgroundService, IPlaybackControl
+public sealed class NationBridge : BackgroundService, IPlaybackControl
 {
-    public const string AppName = "Tauon Music Box";
+    public const string AppName = "Nation";
 
     private static readonly TimeSpan ActivePoll = TimeSpan.FromMilliseconds(500);
     private static readonly TimeSpan IdlePoll = TimeSpan.FromSeconds(3);
@@ -21,7 +20,7 @@ public sealed class TauonBridge : BackgroundService, IPlaybackControl
     private const long DriftToleranceMs = 1_500;
 
     private readonly HttpClient _http;
-    private readonly ILogger<TauonBridge> _logger;
+    private readonly ILogger<NationBridge> _logger;
     private readonly SemaphoreSlim _pollNow = new(0, 1);
 
     private int? _trackId;
@@ -41,10 +40,10 @@ public sealed class TauonBridge : BackgroundService, IPlaybackControl
     // state discontinuity. PlaybackRouter decides what to forward.
     public event Action? Changed;
 
-    public TauonBridge(IConfiguration configuration, ILogger<TauonBridge> logger)
+    public NationBridge(IConfiguration configuration, ILogger<NationBridge> logger)
     {
         _logger = logger;
-        var port = configuration.GetValue("Tauon:Port", 7814);
+        var port = configuration.GetValue("Nation:Port", 7814);
         _http = new HttpClient { BaseAddress = new Uri($"http://127.0.0.1:{port}/"), Timeout = TimeSpan.FromSeconds(2) };
     }
 
@@ -66,7 +65,7 @@ public sealed class TauonBridge : BackgroundService, IPlaybackControl
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Fallo consultando la API de Tauon.");
+                _logger.LogWarning(ex, "Fallo consultando la API de Nation.");
                 SetUnavailable();
             }
 
@@ -83,7 +82,7 @@ public sealed class TauonBridge : BackgroundService, IPlaybackControl
 
     private async Task PollAsync(CancellationToken ct)
     {
-        var status = await _http.GetFromJsonAsync<TauonStatus>("api1/status", ct);
+        var status = await _http.GetFromJsonAsync<NationStatus>("api1/status", ct);
         if (status is null)
         {
             SetUnavailable();
@@ -95,7 +94,7 @@ public sealed class TauonBridge : BackgroundService, IPlaybackControl
         {
             Available = true;
             changed = true;
-            _logger.LogInformation("API de Tauon detectada: carátula, letras y posición vendrán directo de Tauon.");
+            _logger.LogInformation("API de Nation detectada: carátula, letras y posición vendrán directo de Nation.");
         }
 
         if (status.Track is not { } track || status.Id is not { } id)
@@ -167,7 +166,7 @@ public sealed class TauonBridge : BackgroundService, IPlaybackControl
         if (_trackId is not { } id || !HasLyrics) return null;
         try
         {
-            var payload = await _http.GetFromJsonAsync<TauonLyrics>($"api1/lyrics/{id}", ct);
+            var payload = await _http.GetFromJsonAsync<NationLyrics>($"api1/lyrics/{id}", ct);
             return string.IsNullOrWhiteSpace(payload?.LyricsText) ? null : payload.LyricsText;
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or System.Text.Json.JsonException)
@@ -183,7 +182,7 @@ public sealed class TauonBridge : BackgroundService, IPlaybackControl
         CurrentTrack = null;
         CurrentState = null;
         _trackId = null;
-        _logger.LogInformation("API de Tauon no disponible; se usa la información de Windows (SMTC).");
+        _logger.LogInformation("API de Nation no disponible; se usa la información de Windows (SMTC).");
         Changed?.Invoke();
     }
 
@@ -194,7 +193,7 @@ public sealed class TauonBridge : BackgroundService, IPlaybackControl
     public Task TryPreviousAsync() => SendAsync("api1/back");
     public Task TrySeekAsync(long positionMs) => SendAsync($"api1/seek/{Math.Max(0, positionMs)}");
     public Task TryToggleShuffleAsync() => SendAsync("api1/shuffle");
-    // Tauon's repeat is on/off only, so "cycle" just toggles it.
+    // Nation's repeat is on/off only, so "cycle" just toggles it.
     public Task TryCycleRepeatAsync() => SendAsync("api1/repeat");
 
     private async Task SendAsync(string path)
@@ -205,7 +204,7 @@ public sealed class TauonBridge : BackgroundService, IPlaybackControl
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
         {
-            _logger.LogWarning("Tauon no respondió a '{Path}'.", path);
+            _logger.LogWarning("Nation no respondió a '{Path}'.", path);
         }
         // Reflect the result right away instead of waiting for the next tick.
         if (_pollNow.CurrentCount == 0) _pollNow.Release();
@@ -215,20 +214,20 @@ public sealed class TauonBridge : BackgroundService, IPlaybackControl
 
     private static long NowMs() => DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 
-    private sealed record TauonStatus(
+    private sealed record NationStatus(
         [property: JsonPropertyName("status")] string? Status,
         [property: JsonPropertyName("shuffle")] bool Shuffle,
         [property: JsonPropertyName("repeat")] bool Repeat,
         [property: JsonPropertyName("progress")] long Progress,
         [property: JsonPropertyName("id")] int? Id,
-        [property: JsonPropertyName("track")] TauonTrack? Track);
+        [property: JsonPropertyName("track")] NationTrack? Track);
 
-    private sealed record TauonTrack(
+    private sealed record NationTrack(
         [property: JsonPropertyName("title")] string? Title,
         [property: JsonPropertyName("artist")] string? Artist,
         [property: JsonPropertyName("album")] string? Album,
         [property: JsonPropertyName("duration")] long Duration,
         [property: JsonPropertyName("has_lyrics")] bool HasLyrics);
 
-    private sealed record TauonLyrics([property: JsonPropertyName("lyrics_text")] string? LyricsText);
+    private sealed record NationLyrics([property: JsonPropertyName("lyrics_text")] string? LyricsText);
 }

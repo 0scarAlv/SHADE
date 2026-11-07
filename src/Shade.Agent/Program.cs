@@ -26,8 +26,8 @@ builder.Services.AddSingleton<ConsoleDashboard>();
 if (dashboardEnabled) builder.Services.AddHostedService(sp => sp.GetRequiredService<ConsoleDashboard>());
 
 builder.Services.AddSingleton<SmtcSessionWatcher>();
-builder.Services.AddSingleton<TauonBridge>();
-builder.Services.AddHostedService(sp => sp.GetRequiredService<TauonBridge>());
+builder.Services.AddSingleton<NationBridge>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<NationBridge>());
 builder.Services.AddSingleton<PlaybackRouter>();
 builder.Services.AddSingleton<ArtCache>();
 builder.Services.AddSingleton<ClientHub>();
@@ -45,8 +45,8 @@ builder.Services.AddHostedService(sp => sp.GetRequiredService<ResourceMonitorSer
 var app = builder.Build();
 
 var smtc = app.Services.GetRequiredService<SmtcSessionWatcher>();
-var tauon = app.Services.GetRequiredService<TauonBridge>();
-// Single stream of "what's playing" from SMTC or the Tauon API, whichever
+var nationBridge = app.Services.GetRequiredService<NationBridge>();
+// Single stream of "what's playing" from SMTC or the Nation API, whichever
 // is the active source — everything below listens to this, not to SMTC.
 var player = app.Services.GetRequiredService<PlaybackRouter>();
 var artCache = app.Services.GetRequiredService<ArtCache>();
@@ -58,8 +58,8 @@ var metadataProvider = app.Services.GetRequiredService<TrackMetadataProvider>();
 var rfcommServer = app.Services.GetRequiredService<RfcommServer>();
 var resourceMonitor = app.Services.GetRequiredService<ResourceMonitorService>();
 var logger = app.Services.GetRequiredService<ILogger<Program>>();
-// Nation answers the phone's stats sync on the same port the Tauon bridge polls.
-ListenSyncRelay.Configure(app.Configuration.GetValue("Tauon:Port", 7814));
+// Nation answers the phone's stats sync on the same port the Nation bridge polls.
+ListenSyncRelay.Configure(app.Configuration.GetValue("Nation:Port", 7814));
 
 string? lastLyricsKey = null;
 LyricsMessage? currentLyrics = null;
@@ -76,10 +76,10 @@ player.TrackChanged += track =>
         track = TrackMetadataProvider.Apply(track, known);
     PublishTrack(track);
 
-    // The source is part of the key: if Tauon's API comes up after SMTC
+    // The source is part of the key: if Nation's API comes up after SMTC
     // already announced the same song, its lyrics (from the file) replace
     // whatever an online lookup found.
-    var key = $"{TrackMetadataProvider.KeyOf(track)}|{(player.TauonIsSource ? "tauon" : "smtc")}";
+    var key = $"{TrackMetadataProvider.KeyOf(track)}|{(player.NationIsSource ? "nation" : "smtc")}";
     if (key != lastLyricsKey)
     {
         lastLyricsKey = key;
@@ -171,13 +171,13 @@ resourceMonitor.SampleAvailable += sample =>
 
 async Task FetchAndBroadcastLyricsAsync(TrackInfo track, string key)
 {
-    // The file's own lyrics (via Tauon) beat any online match: right song,
+    // The file's own lyrics (via Nation) beat any online match: right song,
     // right version, right timing.
     LyricsResult? result = null;
-    if (player.TauonIsSource && await tauon.FetchLyricsAsync() is { } raw)
+    if (player.NationIsSource && await nationBridge.FetchLyricsAsync() is { } raw)
     {
         result = LyricsProvider.FromRaw(raw);
-        if (result is not null) logger.LogInformation("Letra tomada del archivo (Tauon) para '{Title}'.", track.Title);
+        if (result is not null) logger.LogInformation("Letra tomada del archivo (Nation) para '{Title}'.", track.Title);
     }
     result ??= await lyricsProvider.TryFetchAsync(track.Title, track.Artist, track.Album, track.DurationMs);
     if (result is null || lastLyricsKey != key) return;

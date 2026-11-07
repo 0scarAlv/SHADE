@@ -9,7 +9,7 @@ namespace Shade.Agent.Metadata;
 
 public sealed record TrackEnrichment(string? Album, long DurationMs, byte[]? ArtBytes, string? ArtHash, string? ArtContentType);
 
-// Some players (Tauon Music Box, several browser-based ones) publish only a
+// Some players (several native and browser-based ones) publish only a
 // title and artist to SMTC — no thumbnail, album or duration. This fills
 // the gaps from the iTunes Search API (free, no key), matched by
 // artist + title. Results (including "nothing found") are cached per track

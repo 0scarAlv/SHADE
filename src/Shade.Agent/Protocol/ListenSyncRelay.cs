@@ -16,7 +16,7 @@ public static class ListenSyncRelay
 {
     private static HttpClient _http = NewClient(7814);
 
-    // Same port the Tauon bridge polls: Nation serves both APIs there.
+    // Same port the Nation bridge polls: Nation serves both APIs there.
     public static void Configure(int port) => _http = NewClient(port);
 
     private static HttpClient NewClient(int port) =>
@@ -30,7 +30,7 @@ public static class ListenSyncRelay
             using var profileResponse = await _http.GetAsync("nation/profile");
             if (!profileResponse.IsSuccessStatusCode)
             {
-                // Tauon (or a Nation with stats off) on that port: nothing to sync with.
+                // A Nation with stats off on that port: nothing to sync with.
                 result["error"] = "Nation no tiene estadísticas en este PC";
                 await hub.SendToAsync(connection, result);
                 return;

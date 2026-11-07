@@ -15,51 +15,51 @@ public interface IPlaybackControl
     Task TryCycleRepeatAsync();
 }
 
-// Picks the source of truth between Windows' SMTC and the Tauon API, and
+// Picks the source of truth between Windows' SMTC and the Nation API, and
 // re-exposes a single TrackChanged/StateChanged stream to the rest of the
-// agent. Tauon wins whenever its API is up and it's the thing in use —
+// agent. Nation wins whenever its API is up and it's the thing in use —
 // playing, or paused while nothing else is playing — because it carries
-// art, position and lyrics SMTC doesn't. When the winner flips (Tauon
-// paused and Spotify started, Tauon closed, ...), the new source's current
+// art, position and lyrics SMTC doesn't. When the winner flips (Nation
+// paused and Spotify started, Nation closed, ...), the new source's current
 // track and state are re-emitted so clients never keep stale data.
 public sealed class PlaybackRouter : IPlaybackControl
 {
     private readonly SmtcSessionWatcher _smtc;
-    private readonly TauonBridge _tauon;
+    private readonly NationBridge _nation;
     private readonly object _lock = new();
-    private bool? _lastWasTauon;
-    // Tauon raises Changed for state-only updates too; only re-emit its
+    private bool? _lastWasNation;
+    // Nation raises Changed for state-only updates too; only re-emit its
     // track when it's actually a new object (new song), so art isn't
     // re-pushed to Bluetooth clients on every play/pause.
-    private TrackInfo? _lastTauonTrack;
+    private TrackInfo? _lastNationTrack;
 
     public event Action<TrackInfo>? TrackChanged;
     public event Action<PlaybackState>? StateChanged;
 
-    public PlaybackRouter(SmtcSessionWatcher smtc, TauonBridge tauon)
+    public PlaybackRouter(SmtcSessionWatcher smtc, NationBridge nation)
     {
         _smtc = smtc;
-        _tauon = tauon;
+        _nation = nation;
 
-        _smtc.TrackChanged += track => Forward(fromTauon: false, track, null);
-        _smtc.StateChanged += state => Forward(fromTauon: false, null, state);
-        _tauon.Changed += () => Forward(fromTauon: true, _tauon.CurrentTrack, _tauon.CurrentState);
+        _smtc.TrackChanged += track => Forward(fromNation: false, track, null);
+        _smtc.StateChanged += state => Forward(fromNation: false, null, state);
+        _nation.Changed += () => Forward(fromNation: true, _nation.CurrentTrack, _nation.CurrentState);
     }
 
-    public bool TauonIsSource
+    public bool NationIsSource
     {
         get
         {
-            if (!_tauon.Available || _tauon.CurrentTrack is null) return false;
-            if (_tauon.Playing) return true;
+            if (!_nation.Available || _nation.CurrentTrack is null) return false;
+            if (_nation.Playing) return true;
             var smtcTrack = _smtc.CurrentTrack;
             var smtcPlaying = _smtc.CurrentState?.Playing == true;
-            var smtcIsTauon = smtcTrack?.AppName == TauonBridge.AppName;
-            return smtcTrack is null || smtcIsTauon || !smtcPlaying;
+            var smtcIsNation = smtcTrack?.AppName == NationBridge.AppName;
+            return smtcTrack is null || smtcIsNation || !smtcPlaying;
         }
     }
 
-    private IPlaybackControl Active => TauonIsSource ? _tauon : _smtc;
+    private IPlaybackControl Active => NationIsSource ? _nation : _smtc;
 
     public TrackInfo? CurrentTrack => Active.CurrentTrack;
     public PlaybackState? CurrentState => Active.CurrentState;
@@ -71,27 +71,27 @@ public sealed class PlaybackRouter : IPlaybackControl
     public Task TryToggleShuffleAsync() => Active.TryToggleShuffleAsync();
     public Task TryCycleRepeatAsync() => Active.TryCycleRepeatAsync();
 
-    private void Forward(bool fromTauon, TrackInfo? track, PlaybackState? state)
+    private void Forward(bool fromNation, TrackInfo? track, PlaybackState? state)
     {
         TrackInfo? emitTrack = null;
         PlaybackState? emitState = null;
         lock (_lock)
         {
-            var tauonNow = TauonIsSource;
-            if (_lastWasTauon != tauonNow)
+            var nationNow = NationIsSource;
+            if (_lastWasNation != nationNow)
             {
                 // Source flipped: replay the new source's snapshot.
-                _lastWasTauon = tauonNow;
+                _lastWasNation = nationNow;
                 var active = Active;
                 emitTrack = active.CurrentTrack;
                 emitState = active.CurrentState ?? new PlaybackState(false, 0, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
             }
-            else if (fromTauon == tauonNow)
+            else if (fromNation == nationNow)
             {
-                emitTrack = fromTauon && ReferenceEquals(track, _lastTauonTrack) ? null : track;
+                emitTrack = fromNation && ReferenceEquals(track, _lastNationTrack) ? null : track;
                 emitState = state;
             }
-            if (tauonNow) _lastTauonTrack = _tauon.CurrentTrack;
+            if (nationNow) _lastNationTrack = _nation.CurrentTrack;
         }
 
         if (emitTrack is not null) TrackChanged?.Invoke(emitTrack);
